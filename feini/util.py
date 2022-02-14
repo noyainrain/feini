@@ -26,6 +26,9 @@ class Redis(aioredis.client.Redis):
     def hget(self, name: KeyT, key: FieldT) -> Awaitable[str | None]:
         return cast('Awaitable[str | None]', super().hget(name, key))
 
+    def hgetall(self, name: KeyT) -> Awaitable[dict[str, str]]:
+        return cast(Awaitable[dict[str, str]], super().hgetall(name))
+
     def hset(self, name: KeyT, key: FieldT | None = None, value: EncodableT | None = None,
              mapping: Mapping[AnyFieldT, EncodableT] | None = None) -> Awaitable[int]:
         return cast(Awaitable[int], super().hset(name, key, value, mapping))

@@ -13,8 +13,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = ConfigParser()
     config.read('feini.ini')
+    redis_url = config.get('feini', 'redis_url', fallback='redis:')
     telegram_key = config.get('telegram', 'key', fallback=None)
-    bot = Bot(telegram_key=telegram_key)
+    bot = Bot(redis_url=redis_url, telegram_key=telegram_key)
     asyncio.run(bot.run())
 
 if __name__ == '__main__':
