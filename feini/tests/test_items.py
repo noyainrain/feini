@@ -1,5 +1,5 @@
 from feini.items import Newspaper, Plant, Palette, Television
-from .test_bot import FeiniTestCase
+from .test_space import FeiniTestCase
 
 class PlantTest(FeiniTestCase):
     async def test_tick(self) -> None:

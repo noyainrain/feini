@@ -124,7 +124,7 @@ class SpaceTest(FeiniTestCase):
         axe = await self.space.craft('🪓')
         space = await bot.get().get_space(self.space.id)
         self.assertEqual(axe, '🪓')
-        self.assertEqual(space.tools, ['👋', '✏️', '🔨', '🧺','🪓']) # type: ignore[misc]
+        self.assertEqual(space.tools, self.space.tools + ['🪓']) # type: ignore[misc]
         self.assertEqual(space.resources, ['🥕']) # type: ignore[misc]
 
     async def test_craft_home_item(self) -> None:
@@ -138,3 +138,23 @@ class SpaceTest(FeiniTestCase):
     async def test_craft_no_resources(self) -> None:
         with self.assertRaisesRegex(ValueError, 'resources'):
             await self.space.craft('🪴')
+
+class PetTest(FeiniTestCase):
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.pet = await self.space.get_pet()
+
+    async def test_tick(self) -> None:
+        await self.pet.tick()
+        pet = await self.space.get_pet()
+        self.assertEqual(pet.dirt, self.pet.dirt + 1)
+
+    async def test_wash(self) -> None:
+        await self.pet.wash()
+        pet = await self.space.get_pet()
+        self.assertFalse(pet.dirt)
+
+    async def test_wash_clean(self) -> None:
+        await self.pet.wash()
+        with self.assertRaisesRegex(ValueError, 'dirt'):
+            await self.pet.wash()

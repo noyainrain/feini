@@ -1,259 +1,37 @@
-# TODO
+# Open Feini
+# Copyright (C) 2022 Open Feini contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.
+# If not, see <https://www.gnu.org/licenses/>.
 
 """TODO."""
 
 from __future__ import annotations
 
 from asyncio import get_event_loop, sleep, create_task
-from contextlib import asynccontextmanager
 from datetime import datetime
 from logging import getLogger
-import random
-from typing import TypeVar, cast, Awaitable, AsyncIterator, Callable, overload, Literal
+from typing import Awaitable, AsyncIterator, Callable, cast
 import unicodedata
 
-from aioredis.exceptions import WatchError
 from aiohttp import ClientSession, ClientError
 
 from .actions import (
-    touch, feed_pet, gather_meadow, craft, edit_pet_name, view_tent, chop_wood, shear_pet, usage,
-    view_sleep, view_leaves, view_boomerang, view_ball, view_teddy, view_couch, view_plant,
-    view_fountain, view_television, view_newspaper, view_palette, say)
-from . import context
+    Action, touch, feed_pet, gather_meadow, craft, change_pet_name, view_tent, chop_wood, shear_pet,
+    usage, view_sleep, view_leaves, view_boomerang, view_ball, view_teddy, view_couch, view_plant,
+    view_fountain, view_television, view_newspaper, view_palette, wash_pet)
+from . import actions, context, updates
 from .items import Newspaper, Object, Plant, Palette, Television
-from .util import Redis, Pipeline, JSONObject, randstr
-
-class Space:
-    MEADOW_VEGETABLE_GROWTH_MAX = 7
-    WOODS_GROWTH_MAX = 7
-    PET_NUTRITION_MAX = 25
-    PET_FUR_MAX = 7
-
-    @staticmethod
-    def _resource_order(resource: str) -> int:
-        return {'🥕': 0, '🪨': 1, '🪵': 2, '🧶': 3}[resource]
-
-    def __init__(self, data: dict[str, str]) -> None:
-        self.id = data['id']
-        self.chat = data['chat']
-        self.time = int(data['time'])
-        self.resources = data['resources'].split()
-        self.tools = data['tools'].split()
-        self.meadow_vegetable_growth = int(data['meadow_vegetable_growth'])
-        self.woods_growth = int(data['woods_growth'])
-        self.pet_name = data['pet_name']
-        self.pet_is_egg = bool(data['pet_is_egg'])
-        self.pet_nutrition = int(data['pet_nutrition'])
-        self.pet_fur = int(data['pet_fur'])
-        self.pet_activity_id = data['pet_activity_id']
-        self.story = data['story']
-
-    async def get_objects(self) -> list[Object]:
-        bot = context.bot.get()
-        key = f'{self.id}.items'
-        async with transaction(bot.redis, key) as pipe:
-            item_ids = await pipe.lrange(key, 0, -1)
-            pipe.multi()
-            for item_id in item_ids:
-                pipe.hgetall(item_id)
-            items = cast(list[dict[str, str]], await pipe.execute())
-            return [bot.object_types[data['type']](data) for data in items]
-
-    async def get_pet_activity(self) -> Object | str:
-        if self.pet_activity_id in {'', '💤', '🍃'}:
-            return self.pet_activity_id
-        return await context.bot.get().get_object(self.pet_activity_id)
-
-    async def tick(self, time: int) -> Space:
-        bot = context.bot.get()
-
-        async with bot.redis.pipeline() as pipe:
-            furniture_key = f'{self.id}.items'
-            await pipe.watch(self.id, furniture_key) # type: ignore[misc]
-            space = Space(await pipe.hgetall(self.id))
-            furniture_ids = await pipe.lrange(furniture_key, 0, -1)
-            #furniture = [await pipe.hget(id, 'type') for id in furniture_ids]
-
-            pipe.multi()
-            if space.time == time:
-                pet_activity_id = random.choice(['', '💤', '🍃', *furniture_ids])
-                pet_nutrition = max(space.pet_nutrition - 1, 0)
-                if pet_nutrition == 0 and space.pet_nutrition == 1:
-                    # print(f'{space.id}:pet-mood-change')
-                    bot.send_message(space, f'🍽️🐕 {space.pet_name} is hungry. {say()}')
-                pipe.hset(self.id, mapping={
-                    'meadow_vegetable_growth':
-                        min(space.meadow_vegetable_growth + 1, self.MEADOW_VEGETABLE_GROWTH_MAX),
-                    'woods_growth': min(space.woods_growth + 1, self.WOODS_GROWTH_MAX),
-                    'pet_nutrition': pet_nutrition,
-                    'pet_fur': min(space.pet_fur + 1, self.PET_FUR_MAX),
-                    'pet_activity_id': pet_activity_id
-                })
-                pipe.hincrby(self.id, 'time', 1)
-            pipe.hgetall(self.id)
-
-            data = await cast(Awaitable[list[dict[str, str]]], pipe.execute())
-            space = Space(data[-1])
-
-        for obj in await self.get_objects():
-            await obj.tick(time + 1)
-
-        if pet_activity_id and pet_activity_id not in {'', '💤', '🍃'}:
-            obj = await bot.get_object(pet_activity_id)
-            await obj.use()
-
-        return space
-
-    async def gather_meadow(self) -> list[str]:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split()
-            growth = int(await pipe.hget(self.id, 'meadow_vegetable_growth') or '')
-            pipe.multi()
-            gathered = []
-            if growth == self.MEADOW_VEGETABLE_GROWTH_MAX:
-                gathered = ['🥕', '🪨']
-                resources = sorted(resources + gathered, key=self._resource_order)
-                pipe.hset(self.id,
-                          mapping={'resources': ' '.join(resources), 'meadow_vegetable_growth': 0})
-            await pipe.execute()
-            return gathered
-
-    async def chop_wood(self) -> list[str]:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            space = Space(await pipe.hgetall(self.id))
-            pipe.multi()
-            # TODO some abstraction like Tool() / Action()?
-            if '🪓' not in space.tools:
-                raise ValueError('no axe in tools')
-            wood = []
-            if space.woods_growth == self.WOODS_GROWTH_MAX:
-                wood = ['🪵']
-                resources = sorted(space.resources + wood, key=self._resource_order)
-                pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'woods_growth': 0})
-            await pipe.execute()
-            return wood
-
-    @overload
-    async def use(self, item: Literal['✂️']) -> list[str]:
-        pass
-    @overload
-    async def use(self, item: str) -> object:
-        pass
-    async def use(self, item: str) -> object:
-        if item == '✂️':
-            return await self._shear_pet()
-        raise ValueError(f'Invalid item {item}')
-
-    async def _shear_pet(self) -> list[str]:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            space = Space(await pipe.hgetall(self.id))
-            if '✂️' not in space.tools:
-                raise ValueError('Scissors not in tools')
-            pipe.multi()
-            wool = []
-            if space.pet_fur == self.PET_FUR_MAX:
-                wool = ['🧶']
-                resources = sorted(space.resources + wool, key=self._resource_order)
-                pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'pet_fur': 0})
-            await pipe.execute()
-            return wool
-
-    async def craft(self, typ: str) -> Object | str:
-        bot = context.bot.get()
-        try:
-            cost = bot.costs[typ]
-        except KeyError as e:
-            raise ValueError(f'Unknown typ {typ}') from e
-        if typ in bot.object_types:
-            return await self._craft_home_item(typ, cost)
-        return await self._craft_tool(typ, cost)
-
-    async def _craft_tool(self, typ: str, cost: list[str]) -> str:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split(' ')
-            tools = (await pipe.hget(self.id, 'tools') or '').split(' ')
-            pipe.multi()
-            if typ in tools:
-                raise ValueError('already in tools')
-            try:
-                for resource in cost:
-                    resources.remove(resource)
-            except ValueError as e:
-                raise ValueError('not enough resources') from e
-            tools.append(typ)
-            pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'tools': ' '.join(tools)})
-            await pipe.execute()
-            return typ
-
-    async def _craft_home_item(self, typ: str, cost: list[str]) -> Object:
-        bot = context.bot.get()
-        cls = bot.object_types[typ]
-        id = f'Object:{randstr()}'
-
-        items_key = f'{self.id}.items'
-        async with transaction(bot.redis, self.id, items_key) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split(' ')
-            item_count = await pipe.llen(items_key)
-            pipe.multi()
-            # TODO replace? random? require trash?
-            #if item_count >= 4:
-            #    raise ValueError('max items')
-            try:
-                for resource in cost:
-                    resources.remove(resource)
-            except ValueError as e:
-                raise ValueError('not enough resources') from e
-            pipe.hset(self.id, 'resources', ' '.join(resources))
-            pipe.rpush(items_key, id)
-            await pipe.execute()
-
-        # Transaction note: paid and placeholder in list, so potentially we could call create later
-        # to retry
-        return await cls.create(id, typ)
-
-    async def touch_pet(self) -> None:
-        await context.bot.get().redis.hset(self.id, 'pet_is_egg', '')
-
-    async def feed_pet(self) -> None:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split()
-            nutrition = int(await pipe.hget(self.id, 'pet_nutrition') or '')
-            pipe.multi()
-            if nutrition == self.PET_NUTRITION_MAX:
-                raise ValueError('Max pet_nutrition')
-            try:
-                resources.remove('🥕')
-            except ValueError as e:
-                raise ValueError('🥕 not in resources') from e
-            pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'pet_nutrition': 25})
-            await pipe.execute()
-
-    async def edit_pet_name(self, name: str) -> Space:
-        async with context.bot.get().redis.pipeline() as pipe:
-            pipe.hset(self.id, 'pet_name', name)
-            pipe.hgetall(self.id)
-            data = await cast(Awaitable[list[dict[str, str]]], pipe.execute())
-            return Space(data[-1])
-
-    # TODO later: cook
-    # TODO later: website
-    # - after crafting furniture, set activity to new object - show std touch msg or something like
-    # "feini is very curios"
-
-    # wash_pet() pet_hygiene dirty
-
-# TODO kill this, use pipe.watch(...) explicityl, do not retry on watch error,
-# just tell the user to try again, it will be so selten, mostly never, really...
-@asynccontextmanager
-async def transaction(redis: Redis, *watches: str) -> AsyncIterator[Pipeline]:
-    async with redis.pipeline() as pipe:
-        while True:
-            await pipe.watch(*watches) # type: ignore[misc]
-            try:
-                yield pipe
-                break
-            except WatchError:
-                pass
+from .space import Pet, Space
+from .util import Redis, JSONObject, isemoji, randstr
 
 class Story:
     def __init__(self) -> None:
@@ -293,15 +71,16 @@ class Bot:
         self._base = f'https://api.telegram.org/bot{self.telegram_key}'
 
         # commands: dict[tuple[str, ...], Callable[[Space, str], Awaitable[str]]] = {
-        self._commands: dict[str, Callable[[Space, str], Awaitable[str]]] = {
+        self._commands: dict[str, Action] = {
             '⛺': view_tent,
             '🧺': gather_meadow,
             '🪓': chop_wood,
-            '🥕': feed_pet,
-            '✂️': shear_pet,
             '🔨': craft,
-            '✏️': edit_pet_name,
-            '👋': touch
+            '👋': touch,
+            '🥕': feed_pet,
+            '🧽': wash_pet,
+            '✂️': shear_pet,
+            '✏️': change_pet_name
         }
 
         self.activities: dict[str, Callable[[Space, Object | str], Awaitable[str]]] = {
@@ -329,6 +108,7 @@ class Bot:
                    '✋', '✋\N{VARIATION SELECTOR-16}'],
             '✏️': ['✏', '🖊️', '🖊'],
             '🔨': ['⚒️', '⚒', '🛠️', '🛠'],
+            '🧽': ['🧴', '🧼'],
             '✂️': ['✂'],
             '🪃': ['🥏'],
             '⚾': ['⚾\N{VARIATION SELECTOR-16}', '🥎'],
@@ -414,15 +194,61 @@ class Bot:
         #print('max craft interval:', max_resource, max_count / income[max_resource] / item_count,
         #      'd')
 
+    async def update(self) -> None:
+        from inspect import iscoroutinefunction, signature
+        for name, f in cast(dict[str, object], vars(updates)).items():
+            if name.startswith('update_'):
+                assert iscoroutinefunction(f) and not signature(f).parameters # type: ignore[arg-type]
+                await cast(Callable[[], Awaitable[None]], f)()
+
+                # Will fail with with a TypeError if f is not callable or takes any arguments or
+                # does not return a
+                # Will fail with TypeError, that's fine
+                # await f() # type: ignore[misc,operator]
+
+
+        #reveal_type(x)
+        #x = await cast(Callable[[], Awaitable[None]], f)()
+        #assert iscoroutinefunction(f)
+        #x = await cast(Callable[[], Awaitable[None]], f)()
+        #reveal_type(x)
+        #x = cast(object, f())
+        #assert isawaitable(x)
+        #await x
+        #reveal_type(x)
+        #version = tuple(int(c) for c in (await self.redis.get('version') or '0.0.0').split('.'))
+        #if version < (0, 0, 1):
+        #    space_ids = await self.redis.hvals('spaces_by_chat')
+        #    for space_id in space_ids:
+        #        space = Space(await self.redis.hgetall(space_id))
+        #        self.send_message(space, '✏️ Your pen is working again.')
+        #    await self.redis.set('version', '0.0.1')
+        #version = tuple(int(c) for c in (await self.redis.get('version') or '0.0.0').split('.'))
+        #if version < (0, 0, 1):
+        #    space_ids = await self.redis.hvals('spaces_by_chat')
+        #    async with self.redis.pipeline() as pipe:
+        #        pipe.rpush('events', *(f'{id}.update-pen' for id in space_ids))
+        #        pipe.set('version', '0.0.1')
+        #        await pipe.execute()
+
+    @staticmethod
+    async def space_update_pen(space: Space) -> str:
+        return '✏️ Your pen is working again.'
+
+    @staticmethod
+    async def space_pet_is_hungry(space: Space) -> str:
+        return f'🍽️🐕 {space.pet_name} is hungry. {say()}'
+
     async def run(self) -> None:
         print('STARTING BOT')
         context.bot.set(self)
 
+        await self.update()
+
         # get_event_loop().create_task(self._handle())
+        create_task(self._handle_events())
         create_task(self._handle())
         TICK = 60 * 60
-        #TICK = 1
-        #TICK = 30
 
         now = datetime.now().timestamp()
         now = now // TICK
@@ -466,7 +292,7 @@ class Bot:
         available = {*space.resources, *space.tools,
                      *(obj.type for obj in await space.get_objects()), '⛺'}
         if item not in available:
-            word = item if self.is_symbol(item) else f'“{item}”'
+            word = item if isemoji(item) else f'“{item}”'
             return f'You have no {word} at the moment. Maybe have a look in the ⛺?'
 
         f = self._commands.get(item, usage)
@@ -486,35 +312,41 @@ class Bot:
     async def create_space(self, chat: str) -> Space:
         async with self.redis.pipeline() as pipe:
             #time = await cast(Awaitable[str], pipe.get('time'))
+            space_id = f'Space:{randstr()}'
+            pet_id = f'Pet:{randstr()}'
             data = {
-                'id': f'Space:{randstr()}',
+                'id': space_id,
                 'chat': chat,
                 'time': str(self.time),
                 'resources': '',
-                'tools': '👋 ✏️ 🔨 🧺',
+                # in reverse order: care, gather, craft, other
+                'tools': '👋 ✏️ 🔨 🧺 🧽',
                 'meadow_vegetable_growth': str(Space.MEADOW_VEGETABLE_GROWTH_MAX),
                 'woods_growth': str(Space.WOODS_GROWTH_MAX),
+                'pet_id': pet_id,
                 'pet_name': 'Feini',
                 'pet_is_egg': 'true',
-                'pet_nutrition': '0',
-                'pet_fur': str(Space.PET_FUR_MAX),
+                'pet_nutrition': str(Space.INTERVAL_S),
+                'pet_fur': '0',
                 'pet_activity_id': '',
                 'story': 'touch'
             }
-            pipe.hset(data['id'], mapping=data)
+            pet_data = {
+                'id': pet_id,
+                'space_id': space_id,
+                'dirt': str(Pet.MAX_DIRT - Space.INTERVAL_S)
+            }
+            pipe.hset(space_id, mapping=data)
+            pipe.hset(pet_id, mapping=pet_data)
             pipe.hset('spaces_by_chat', chat, data['id'])
             await pipe.execute()
             return Space(data)
-
-    @staticmethod
-    def is_symbol(string: str) -> bool:
-        return unicodedata.category(string[0]) == 'So'
 
     def _parse(self, command: str) -> list[str]:
         if not command:
             return []
         category = unicodedata.category(command[0])
-        if category[0] == 'Z': # space
+        if category.startswith('Z'): # space
             return self._parse(command[1:]) # could optimize by eliminating whole run
         if category == 'So':
             if len(command) >= 2 and command[1] in '\ufe0e\ufe0f':
@@ -526,9 +358,11 @@ class Bot:
         #        index = i
         #        break
         i = 0
-        # TODO stop on whitespace also
-        while i < len(command) and unicodedata.category(command[i]) != 'So':
+        while not (category == 'So' or category.startswith('Z')):
             i = i + 1
+            if i >= len(command):
+                break
+            category = unicodedata.category(command[i])
         return [command[:i]] + self._parse(command[i:])
 
     #@staticmethod
@@ -558,6 +392,31 @@ class Bot:
     #    if text:
     #        tokens.append(''.join(text).strip())
     #    return tokens
+
+    async def _handle_events(self) -> None:
+        #event_messages = {}
+        #for event_message in cast(dict[str, object], vars(actions)).values():
+        #    if isinstance(event_message, actions.EventMessageFunc):
+        #        event_messages[event_message.event_type] = event_message
+        members = cast(dict[str, object], vars(actions)).values()
+        event_messages = {
+            member.event_type:
+                member for member in members if isinstance(member, actions.EventMessageFunc)
+        }
+
+        # self._event_handlers: dict[str, Callable[[Space], Awaitable[str]]] = {}
+
+        while True:
+            _, event = await self.redis.blpop('events')
+            event_type, space_id = event.split()
+            space = await self.get_space(space_id)
+            f = event_messages[event_type]
+            try:
+                reply = await f(space)
+            except Exception as e:
+                getLogger().exception('EVENT HANDLER ERROR')
+            else:
+                self.send_message(space, reply)
 
     async def _handle(self) -> None:
         #import sys
@@ -623,9 +482,12 @@ class Bot:
         while True:
             try:
                 body = {'chat_id': user_id, 'text': text}
-                response = await self._client.post(f'{self._base}/sendMessage', json=body,
-                                                   raise_for_status=True)
-                await response.read()
+                response = await self._client.post(f'{self._base}/sendMessage', json=body) #, raise_for_status=True)
+                detail = await response.text()
+                if not response.ok:
+                    getLogger(__name__).warning('TMP REPLY ERROR HTTP %d (%s)', response.status, detail)
+                    await sleep(1)
+                    continue
                 break
             except ClientError as e:
                 print('TMP REPLY ERROR, RETRYING...', e)

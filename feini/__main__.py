@@ -3,7 +3,6 @@
 """TODO."""
 
 import asyncio
-from asyncio import get_event_loop
 from configparser import ConfigParser
 import logging
 
