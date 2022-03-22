@@ -12,26 +12,33 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.
 # If not, see <https://www.gnu.org/licenses/>.
 
-"""TODO."""
+"""Open Feini chatbot."""
+
+# /clean
 
 from __future__ import annotations
 
-from asyncio import get_event_loop, sleep, create_task
+import asyncio
+from asyncio import CancelledError, Queue, shield, sleep, create_task
+from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
+import json
+from json import JSONDecodeError
 from logging import getLogger
 from typing import Awaitable, AsyncIterator, Callable, cast
 import unicodedata
+from urllib.parse import urljoin
 
-from aiohttp import ClientSession, ClientError
+from aiohttp import ClientError, ClientPayloadError, ClientSession, ClientTimeout
 
-from .actions import (
-    Action, touch, feed_pet, gather_meadow, craft, change_pet_name, view_tent, chop_wood, shear_pet,
-    usage, view_sleep, view_leaves, view_boomerang, view_ball, view_teddy, view_couch, view_plant,
-    view_fountain, view_television, view_newspaper, view_palette, wash_pet)
+from .actions import (MainMode, view_sleep, view_leaves, view_boomerang, view_ball, view_teddy,
+                      view_couch, view_plant, view_fountain, view_television, view_newspaper,
+                      view_palette)
 from . import actions, context, updates
 from .items import Newspaper, Object, Plant, Palette, Television
 from .space import Pet, Space
-from .util import Redis, JSONObject, isemoji, randstr
+from .util import Redis, JSONObject, cancel, raise_for_status, randstr, recovery
 
 class Story:
     def __init__(self) -> None:
@@ -46,43 +53,61 @@ class Story:
             pipe.multi()
             if space.story == 'touch' and not space.pet_is_egg:
                 pipe.hset(space.id, 'story', 'gather')
-                bot.send_message(space, f'ℹ️  {space.pet_name} seems hungry. You can gather some veggies with 🧺.')
+                bot.send(
+                    Message(
+                        space.chat,
+                        f'ℹ️  {space.pet_name} seems hungry. You can gather some veggies with 🧺.'))
             elif space.story == 'gather' and '🥕' in space.resources:
                 pipe.hset(space.id, 'story', 'feed')
-                bot.send_message(space, f'ℹ️  You can now feed {space.pet_name} with 🥕.')
+                bot.send(Message(space.chat, f'ℹ️  You can now feed {space.pet_name} with 🥕.'))
             elif space.story == 'feed' and space.pet_nutrition == Space.PET_NUTRITION_MAX:
                 pipe.hset(space.id, 'story', 'craft')
-                bot.send_message(
-                    space,
-                    f'ℹ️  You can craft tools and furniture for {space.pet_name} with 🔨. You can currently afford to craft an axe with 🔨🪓.')
+                bot.send(
+                    Message(
+                        space.chat,
+                        f'ℹ️  You can craft tools and furniture for {space.pet_name} with 🔨. You can currently afford to craft an axe with 🔨🪓.'))
             elif space.story == 'craft' and '🪓' in space.tools:
                 pipe.hset(space.id, 'story', '')
-                bot.send_message(
-                    space,
-                    f'ℹ️  All items are placed in the tent. You can view it with ⛺. You can watch and pet {space.pet_name} any time with 👋.')
+                bot.send(
+                    Message(
+                        space.chat,
+                        f'ℹ️  All items are placed in the tent. You can view it with ⛺. You can watch and pet {space.pet_name} any time with 👋.'))
             await pipe.execute()
 
 class Bot:
-    def __init__(self, *, redis_url: str = 'redis:', telegram_key: str | None = None) -> None:
-        self.telegram_key = telegram_key
+    """Open Feini chatbot.
+
+    .. attribute:: time
+
+       TODO.
+
+    .. attribute:: redis
+
+       Redis database.
+
+    .. attribute:: redis_url
+
+       TODO.
+
+    .. attribute:: debug
+
+       Indicates if debug mode is enabled.
+    """
+
+    def __init__(self, *, redis_url: str = 'redis:', debug: bool = False,
+                 telegram_key: str | None = None) -> None:
         self.time = 0
-
+        self.redis_url = redis_url
+        self.debug = debug
+        # TODO handle redis_url error
+        # TODO handle redis errors (in all event loops)
         self.redis = cast(Redis, Redis.from_url(redis_url, decode_responses=True))
-        self._base = f'https://api.telegram.org/bot{self.telegram_key}'
+        self.http = ClientSession(timeout=ClientTimeout(total=20))
+        self.telegram = Telegram(telegram_key) if telegram_key else None
 
-        # commands: dict[tuple[str, ...], Callable[[Space, str], Awaitable[str]]] = {
-        self._commands: dict[str, Action] = {
-            '⛺': view_tent,
-            '🧺': gather_meadow,
-            '🪓': chop_wood,
-            '🔨': craft,
-            '👋': touch,
-            '🥕': feed_pet,
-            '🧽': wash_pet,
-            '✂️': shear_pet,
-            '✏️': change_pet_name
-        }
+        self._outbox: Queue[Message] = Queue()
 
+        # TODO move to actions / mode
         self.activities: dict[str, Callable[[Space, Object | str], Awaitable[str]]] = {
         #self.activities = {
             '💤': view_sleep,
@@ -98,10 +123,14 @@ class Bot:
             '🎨': view_palette
         }
 
-        #self._commands = {
-        #    emoji: f for emojis, f in commands.items() for emoji in emojis
-        #}
-
+        # TODO in actions.py: (use on first action arg and match with actions, so maybe in Mode)
+        #def normalize_emoji(emoji: str) -> str:
+        #    """TODO. emoji variations, multiple emojis expressing the same concept and text alias.
+        #    normalize. *emoji* may also be a text representation"""
+        #    try:
+        #        return _EMOJI_VARIANTS[emoji]
+        #    except KeyError:
+        #        return emoji
         # see https://unicode.org/emoji/charts/emoji-variants.html
         alternatives = {
             '👋': ['👋\N{VARIATION SELECTOR-16}', '🤚', '🤚\N{VARIATION SELECTOR-16}', '🖐️', '🖐︎',
@@ -123,6 +152,7 @@ class Bot:
         }
         #print('ALTERNATIVES', self.alternatives)
 
+        # TODO parse_entity()
         self.object_types = {
             # Toys
             '🪃': Object,   # simple
@@ -139,60 +169,63 @@ class Bot:
             '🎨': Palette # state
         }
 
-        self.costs = {
-        	# Tools
-            '🪓': ['🪨'], # S, 1 d
-            '✂️': ['🪨', '🪨', '🪨'],  # S, 3 d
-            '🍳': ['🪨', '🪨', '🪨', '🪨'], # S, 4 d
-            '🚿': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M, 4 d
-            # Toys
-            '🪃': ['🪵', '🪵'], # S, 2 d
-            '⚾': ['🪵', '🧶', '🧶', '🧶'], # S, 3 d
-            '🧸': ['🧶', '🧶', '🧶', '🧶'], # S, 4 d
-            # Furniture
-            '🛋️': ['🪨', '🪵', '🪵', '🪵', '🪵', '🧶', '🧶', '🧶', '🧶'], # L, 4 d
-            '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'],  # M, 4 d
-            '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L, 7 d
-            # Devices
-            '📺': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M 4 d
-            # Miscellaneous
-            '🗞️': ['🪵', '🪵', '🧶', '🧶'], # S, 2 d
-            '🎨': ['🪵', '🪵', '🪵', '🪨', '🧶', '🧶', '🧶'] # M, 3 d
-        }
+    # clean
 
-        ## with sizes:
-        ##       S       M       L
-        ##slots: 5 * 2 + 4 * 3 + 2 * 4 = 30
-        ##30 slots
-        ##=> 2.2 per slot
-        #CRAFT_INTERVAL = 2
-        #costs = {typ: list(cost) for typ, cost in self.costs.items()}
-        #del costs['🪓']
-        #del costs['🪃']
-        #from itertools import chain
-        #merged = list(chain(*costs.values())) #cost for cost in self.costs.values()]
-        #dist = {resource: merged.count(resource) for resource in ('🪨', '🪵', '🧶')}
-        #income = {'🪨': 1, '🪵': 1, '🧶': 1}
-        #sum_income = sum(income.values())
-        #item_count = len(costs)
-        #print('Items:', item_count)
-        #print('Income:', sum_income, '/ d')
-        #print('Target craft interval:', CRAFT_INTERVAL, 'd')
-        #print('=> Distribute resources:', item_count * sum_income * CRAFT_INTERVAL)
-        #print('=> Resources / item:', sum_income * CRAFT_INTERVAL)
-        #print('---')
-        #for resource, count in dist.items():
-        #    expected = income[resource] * item_count * CRAFT_INTERVAL
-        #    print(resource * count, count, '/', expected)
-        #print('avg craft interval:', len(merged) / sum_income / len(costs), 'd')
-        #max_resource = ''
-        #max_count = 0
-        #for resource, count in dist.items():
-        #    if count > max_count:
-        #        max_resource = resource
-        #        max_count = count
-        #print('max craft interval:', max_resource, max_count / income[max_resource] / item_count,
-        #      'd')
+    async def close(self) -> None:
+        """Close the database connection."""
+        await self.redis.close()
+        # Work around Redis not closing its connection pool (see
+        # https://github.com/aio-libs/aioredis-py/issues/1103)
+        try:
+            await self.redis.connection_pool.disconnect() # type: ignore[misc]
+        except CancelledError:
+            pass
+        await self.http.close()
+
+    def send(self, message: Message) -> None:
+        """Send a *message*."""
+        self._outbox.put_nowait(message)
+
+    async def _handle_inbox(self, telegram: Telegram) -> None:
+        logger = getLogger(__name__)
+        logger.info('Started Telegram inbox')
+        try:
+            while True:
+                try:
+                    async for message in telegram.inbox():
+                        reply = '⚠️ Oops, something went very wrong! We will fix the problem as soon as possible. Meanwhile, you may try again.'
+                        with recovery():
+                            reply = await shield(self.perform(message.chat, message.text))
+                        self.send(Message(message.chat, reply))
+                except ClientError as e:
+                    logger.warning('Failed to receive Telegram messages (%s)', e)
+                    await sleep(1)
+        except CancelledError:
+            logger.info('Stopped Telegram inbox')
+            raise
+
+    async def _handle_outbox(self, telegram: Telegram) -> None:
+        logger = getLogger(__name__)
+        logger.info('Started Telegram outbox')
+        try:
+            while True:
+                message = await self._outbox.get()
+                try:
+                    with recovery():
+                        while True:
+                            try:
+                                await telegram.send(message)
+                                break
+                            except ClientError as e:
+                                logger.warning('Failed to send Telegram message (%s)', e)
+                                await sleep(1)
+                finally:
+                    self._outbox.task_done()
+        except CancelledError:
+            logger.info('Stopped Telegram outbox')
+            raise
+
+    # /clean
 
     async def update(self) -> None:
         from inspect import iscoroutinefunction, signature
@@ -240,66 +273,79 @@ class Bot:
         return f'🍽️🐕 {space.pet_name} is hungry. {say()}'
 
     async def run(self) -> None:
-        print('STARTING BOT')
         context.bot.set(self)
 
         await self.update()
 
-        # get_event_loop().create_task(self._handle())
-        create_task(self._handle_events())
-        create_task(self._handle())
+        events_task = create_task(self._handle_events())
+        inbox_task = None
+        outbox_task = None
+        if self.telegram:
+            inbox_task = create_task(self._handle_inbox(self.telegram))
+            outbox_task = create_task(self._handle_outbox(self.telegram))
+
         TICK = 60 * 60
 
         now = datetime.now().timestamp()
         now = now // TICK
 
-        while True:
-            self.time = int(datetime.now().timestamp() / TICK)
-            getLogger().info('Tick %s', self.time)
+        logger = getLogger(__name__)
+        logger.info('Started bot')
 
-            space_ids = await cast(Awaitable[list[str]], self.redis.hvals('spaces_by_chat'))
-            for space_id in space_ids:
-                #space = Space(
-                #    await cast(Awaitable[dict[str, str]], self.redis.hgetall(f'Space:{space_id}')))
-                space = await self.get_space(space_id)
-                while space.time < self.time:
-                    space = await space.tick(space.time)
-                    #print(
-                    #    space.id, space.pet_name, space.time, 'M', space.meadow_vegetable_growth,
-                    #    'W', space.woods_growth, 'F', space.pet_fur, 'N', space.pet_nutrition)
-                    ##    [item.type for item in await space.get_objects()])
+        try:
+            while True:
+                self.time = int(datetime.now().timestamp() / TICK)
 
-            await sleep((self.time + 1) * TICK - datetime.now().timestamp())
+                space_ids = await cast(Awaitable[list[str]], self.redis.hvals('spaces_by_chat'))
+                for space_id in space_ids:
+                    #space = Space(
+                    #    await cast(Awaitable[dict[str, str]], self.redis.hgetall(f'Space:{space_id}')))
+                    space = await self.get_space(space_id)
+                    while space.time < self.time:
+                        space = await space.tick(space.time)
+                        #print(
+                        #    space.id, space.pet_name, space.time, 'M', space.meadow_vegetable_growth,
+                        #    'W', space.woods_growth, 'F', space.pet_fur, 'N', space.pet_nutrition)
+                        ##    [item.type for item in await space.get_objects()])
+
+                logger.info('Simulated world at tick %d', self.time)
+                await sleep((self.time + 1) * TICK - datetime.now().timestamp())
+
+        except CancelledError:
+            await cancel(events_task)
+            if inbox_task:
+                await cancel(inbox_task)
+            if outbox_task:
+                await cancel(outbox_task)
+            logger.info('Stopped bot')
+            raise
 
         #time = int(await cast('Awaitable[str | None]', self.redis.get('time')) or '0')
         #await self.redis.set('time', time) # type: ignore[misc]
 
-    async def _handle_command(self, chat: str, text: str) -> str:
+    async def perform(self, chat: str, action: str) -> str:
+        """TODO."""
+        logger = getLogger(__name__)
+
         space_id = await self.redis.hget('spaces_by_chat', chat)
         if space_id:
             space = await self.get_space(space_id)
         else:
             space = await self.create_space(chat)
-            getLogger().info('New space @%s %s', space.id, space.pet_name)
-            self.send_message(space, 'ℹ️  You can touch the egg by sending a 👋 emoji. What will happen?')
-            return '🥚 You found an egg. 😮'
+            self.send(Message(space.chat, '🥚 You found an egg. 😮'))
+            logger.info('Created space for %s (%s)', chat, space.pet_name)
+            # OQ maybe better to start story with 'initial' state and send this message there? how
+            # would we handle the first message of a quest (when the player starts it with an
+            # action)?
+            return 'ℹ️  You can touch the egg by sending a 👋 emoji. What will happen?'
 
-        tokens = self._parse(text)
+        tokens = self._parse(action)
         tokens = [self.alternatives.get(token, token) for token in tokens]
-        getLogger().info("%s @%s %s", ' '.join(tokens), space.id, space.pet_name)
 
-        item = tokens[0]
-        available = {*space.resources, *space.tools,
-                     *(obj.type for obj in await space.get_objects()), '⛺'}
-        if item not in available:
-            word = item if isemoji(item) else f'“{item}”'
-            return f'You have no {word} at the moment. Maybe have a look in the ⛺?'
+        reply = await MainMode().perform(space, *tokens)
+        create_task(Story().update(space))
 
-        f = self._commands.get(item, usage)
-        reply = await f(space, *tokens)
-
-        await Story().update(space)
-
+        logger.info('%s (%s): %s', chat, space.pet_name, ' '.join(tokens))
         return reply
 
     async def get_space(self, id: str) -> Space:
@@ -394,104 +440,140 @@ class Bot:
     #    return tokens
 
     async def _handle_events(self) -> None:
-        #event_messages = {}
-        #for event_message in cast(dict[str, object], vars(actions)).values():
-        #    if isinstance(event_message, actions.EventMessageFunc):
-        #        event_messages[event_message.event_type] = event_message
-        members = cast(dict[str, object], vars(actions)).values()
-        event_messages = {
-            member.event_type:
-                member for member in members if isinstance(member, actions.EventMessageFunc)
-        }
+        logger = getLogger(__name__)
+        logger.info('Started event queue')
 
-        # self._event_handlers: dict[str, Callable[[Space], Awaitable[str]]] = {}
+        try:
+            #event_messages = {}
+            #for event_message in cast(dict[str, object], vars(actions)).values():
+            #    if isinstance(event_message, actions.EventMessageFunc):
+            #        event_messages[event_message.event_type] = event_message
+            members = cast(dict[str, object], vars(actions)).values()
+            event_messages = {
+                member.event_type:
+                    member for member in members if isinstance(member, actions.EventMessageFunc)
+            }
 
-        while True:
-            _, event = await self.redis.blpop('events')
-            event_type, space_id = event.split()
-            space = await self.get_space(space_id)
-            f = event_messages[event_type]
-            try:
-                reply = await f(space)
-            except Exception as e:
-                getLogger().exception('EVENT HANDLER ERROR')
-            else:
-                self.send_message(space, reply)
+            # self._event_handlers: dict[str, Callable[[Space], Awaitable[str]]] = {}
 
-    async def _handle(self) -> None:
-        #import sys
-        #for i in range(0, sys.maxunicode):
-        #    c = chr(i)
-        #    if unicodedata.category(c) == 'So':
-        #        print(c, end='')
+            while True:
+                _, event = await self.redis.blpop('events')
+                with recovery():
+                    event_type, space_id = event.split()
+                    space = await self.get_space(space_id)
+                    f = event_messages[event_type]
+                    reply = await shield(f(space))
+                    self.send(Message(space.chat, reply))
 
-        loop = get_event_loop()
-        self._client = ClientSession()
+        except CancelledError:
+            logger.info('Stopped event queue')
+            raise
 
-        async for user_id, text in self._updates():
-            if user_id and text:
-                try:
-                    reply = await self._handle_command(str(user_id), text)
-                except Exception as e:
-                    getLogger().exception('Gateway error')
-                    reply = '⚠ OMG sorry, fatal error, we will fix it!'
-                loop.create_task(self._reply(user_id, reply))
+# clean
 
-        print('HANDLE EXIT')
-        await self._client.close()
+@dataclass
+class Message:
+    """Chat message.
 
-    async def _updates(self) -> AsyncIterator[tuple[int, str]]:
-        # TODO load offset
+    .. attribute:: chat
+
+       Related chat ID.
+
+    .. attribute:: text
+
+       Message content.
+    """
+
+    chat: str
+    text: str
+
+class Telegram:
+    """Telegram messenger client.
+
+    .. attribute:: key
+
+       API key.
+    """
+
+    def __init__(self, key: str) -> None:
+        self.key = key
+        self._base = f'https://api.telegram.org/bot{self.key}/'
+
+    async def inbox(self) -> AsyncIterator[Message]:
+        """Message inbox.
+
+        If there is a problem communicating with Telegram, a :exc:`aiohttp.ClientError` is raised.
+        """
+        # Note that if there is a crash while a batch of messages is yielded, the messages will be
+        # repeated
         offset = 0
-
         while True:
             try:
-                url = f'{self._base}/getUpdates?timeout=360&offset={offset}'
-                # print(url)
-                t = datetime.now()
-                response = await self._client.get(url, raise_for_status=True)
-                data = await cast(Awaitable[object], response.json())
-                # print(response.status, data, datetime.now() - t)
-                if not isinstance(data, dict):
-                    raise TypeError()
-                result = JSONObject(data)
-                updates: list[tuple[int, int | None, str | None]] = []
-                for data in result.get('result', list):
-                    if not isinstance(data, dict):
-                        raise TypeError()
-                    update = JSONObject(data)
-                    update_id = update.get('update_id', int)
-                    message = update.get('message', JSONObject, optional=True)
-                    if message:
-                        yield (message.get('from', JSONObject).get('id', int),
-                               message.get('text', str))
-                    # TODO store offset
+                response = await context.bot.get().http.get(
+                    urljoin(self._base, 'getUpdates'),
+                    params={'offset': str(offset), 'timeout': '300'}, # type: ignore[misc]
+                    timeout=320)
+                await raise_for_status(response)
+                loads = partial(cast(Callable[[], object], json.loads), object_hook=JSONObject)
+                result = await cast(Awaitable[object], response.json(loads=loads))
+            except JSONDecodeError as e:
+                raise ClientPayloadError('Bad response format') from e
+            except asyncio.TimeoutError as e:
+                raise ClientError('Stalled request') from e
+
+            try:
+                if not isinstance(result, JSONObject):
+                    raise ClientPayloadError(f'Bad result type {type(result).__name__}')
+                for update in result.get('result', cls=list):
+                    if not isinstance(update, JSONObject):
+                        raise ClientPayloadError(f'Bad update type {type(update).__name__}')
+                    update_id = update.get('update_id', cls=int)
+                    if 'message' in update:
+                        message = update.get('message', cls=JSONObject)
+                        yield Message(str(message.get('chat', cls=JSONObject).get('id', cls=int)),
+                                      message.get('text', cls=str))
                     offset = update_id + 1
+            except TypeError as e:
+                raise ClientPayloadError(str(e)) from e
 
-            except (ClientError, TypeError) as e:
-                print('TMP GET ERROR, RETRYING...', e)
-                await sleep(1)
+    async def send(self, message: Message) -> None:
+        """Send a *message*.
 
-    def send_message(self, space: Space, text: str) -> None:
-        async def f() -> None:
-            await sleep(1)
-            await self._reply(int(space.chat), text)
-        get_event_loop().create_task(f())
+        If the indicated *chat* is not available, a :exc:`KeyError` is raised. If there is a problem
+        communicating with the service, a :exc:`aiohttp.ClientError` is raised.
+        """
+        try:
+            chat = int(message.chat)
+        except ValueError:
+            raise KeyError(message.chat) from None
+        if not message.text.strip():
+            return
 
-    async def _reply(self, user_id: int, text: str) -> None:
-        while True:
+        try:
+            response = await context.bot.get().http.post(
+                urljoin(self._base, 'sendMessage'),
+                json={'chat_id': chat, 'text': message.text}) # type: ignore[misc]
+            if response.status >= 500:
+                await raise_for_status(response)
+            loads = partial(cast(Callable[[], object], json.loads), object_hook=JSONObject)
+            result = await cast(Awaitable[object], response.json(loads=loads))
+        except JSONDecodeError as e:
+            raise ClientPayloadError('Bad response format') from e
+        except asyncio.TimeoutError as e:
+            raise ClientError('Stalled request') from e
+
+        if not response.ok:
             try:
-                body = {'chat_id': user_id, 'text': text}
-                response = await self._client.post(f'{self._base}/sendMessage', json=body) #, raise_for_status=True)
-                detail = await response.text()
-                if not response.ok:
-                    getLogger(__name__).warning('TMP REPLY ERROR HTTP %d (%s)', response.status, detail)
-                    await sleep(1)
-                    continue
-                break
-            except ClientError as e:
-                print('TMP REPLY ERROR, RETRYING...', e)
-                await sleep(1)
+                if not isinstance(result, JSONObject):
+                    raise ClientPayloadError(f'Bad result type {type(result).__name__}')
+                code = result.get('error_code', cls=int)
+                if code in {400, 403}:
+                    raise KeyError(message.chat)
+                raise ClientPayloadError(f'Bad error_code {code}')
+            except TypeError as e:
+                raise ClientPayloadError(str(e)) from e
+
+# /clean
 
 #class Telegram:
 #    @dataclass

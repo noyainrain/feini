@@ -16,17 +16,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from asyncio import CancelledError, Task
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 import random
+import re
 import string
-from typing import Awaitable, Literal, Type, TypeVar, cast, overload
+import sys
+from typing import Awaitable, Type, TypeVar, cast, overload
 import unicodedata
 
+from aiohttp import ClientResponse, ClientResponseError
 import aioredis.client
 from aioredis.client import AnyFieldT, ExpiryT, FieldT, KeyT, KeysT, TimeoutSecT
 from aioredis.connection import EncodableT
 
 _T = TypeVar('_T')
+
+def truncate(text: str, length: int = 16) -> str:
+    """Truncate *text* at *length*.
+
+    A truncated text ends with an ellipsis character.
+    """
+    return f'{text[:length - 1]}…' if len(text) > length else text
 
 def isemoji(char: str) -> bool:
     """Guess if *char* is an emoji.
@@ -37,7 +49,61 @@ def isemoji(char: str) -> bool:
         1 <= len(char) <= 2 and unicodedata.category(char[0]) == 'So' and
         (len(char) == 1 or char[1] in '\N{VARIATION SELECTOR-15}\N{VARIATION SELECTOR-16}'))
 
-# / Clean
+async def raise_for_status(response: ClientResponse) -> None:
+    """Raise a ClientResponseError if the *response* status is 400 or higher.
+
+    The server error message is included.
+    """
+    if not response.ok:
+        message = truncate(re.sub(r'\s+', ' ', await response.text()), 1024)
+        raise ClientResponseError(response.request_info, response.history, status=response.status,
+                                  message=message, headers=response.headers)
+
+class JSONObject(dict[str, object]):
+    """JSON object providing type safe member access."""
+
+    @overload
+    def get(self, key: str, default: object = None, *, cls: None = None) -> object:
+        pass
+    @overload
+    def get(self, key: str, *, cls: Type[_T]) -> _T:
+        pass
+    @overload
+    def get(self, key: str, default: _T, *, cls: Type[_T]) -> _T:
+        pass
+    def get(self, key: str, default: object = None, *, # type: ignore[misc]
+            cls: Type[_T] | None = None) -> object:
+        """Return the value for *key*.
+
+        *cls* is the value's expected type and a :exc:`TypeError` is raised if validation fails.
+        """
+        value = super().get(key, default)
+        if cls and not isinstance(value, cls):
+            raise TypeError(f'Bad {key} type {type(value).__name__}')
+        return value
+
+# /clean
+
+@contextmanager
+def recovery() -> Iterator[None]:
+    """Return a context manager that recovers from unhandled exceptions in the block.
+
+    Conceptionally, the block is executed on its own stack, without the overhead of creating a
+    thread or task.
+    """
+    try:
+        # pylint: disable=broad-except
+        yield
+    except Exception:
+        sys.excepthook(*sys.exc_info())
+
+async def cancel(task: Task[None]) -> None:
+    """Cancel the *task*."""
+    task.cancel()
+    try:
+        await task
+    except CancelledError:
+        pass
 
 def randstr(length: int = 16, charset: str = string.ascii_lowercase) -> str:
     """Generate a random string.
@@ -47,6 +113,9 @@ def randstr(length: int = 16, charset: str = string.ascii_lowercase) -> str:
     return ''.join(random.choice(charset) for i in range(length))
 
 class Redis(aioredis.client.Redis):
+    async def close(self) -> None:
+        await cast(Awaitable[None], super().close()) # type: ignore[no-untyped-call]
+
     def pipeline(self, transaction: bool = True, shard_hint: str | None = None) -> Pipeline:
         return cast(Pipeline, super().pipeline(transaction, shard_hint))
 
@@ -91,34 +160,5 @@ class Pipeline(aioredis.client.Pipeline, Redis):
     async def execute(self, raise_on_error: bool = True) -> list[object]:
         return await self.execute(raise_on_error)
 
-class JSONObject:
-    def __init__(self, data: dict[str, object]) -> None:
-        self.data = data
-
-    @overload
-    def get(self, key: str, cls: Type[_T], *, optional: Literal[False] = False) -> _T:
-        pass
-    @overload
-    def get(self, key: str, cls: Type[_T], *, optional: Literal[True]) -> _T | None:
-        pass
-    def get(self, key: str, cls: Type[_T], *, optional: bool = False) -> _T | None:
-        value = self.data.get(key)
-        if optional and value is None:
-            return None
-        if issubclass(cls, JSONObject):
-            if not isinstance(value, dict):
-                raise TypeError(f'Invalid {key} type {type(value).__name__}')
-            return cast(_T, cls(value))
-        if not isinstance(value, cls):
-            raise TypeError(f'Invalid {key} type {type(value).__name__}')
-        return value
-
-    #@overload
-    #def get_object(self, key: str, *, optional: Literal[False] = False) -> JSONObject:
-    #    pass
-    #@overload
-    #def get_object(self, key: str, *, optional: Literal[True]) -> JSONObject | None:
-    #    pass
-    #def get_object(self, key: str, *, optional: bool = False) -> JSONObject | None:
-    #    value = self.get(key, dict, optional=True) if optional else self.get(key, dict)
-    #    return JSONObject(value) if value else None
+    async def watch(self, *names: KeyT) -> None:
+        return await cast(Awaitable[None], super().watch(*names))

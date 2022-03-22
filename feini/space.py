@@ -16,8 +16,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Iterable
 from contextlib import asynccontextmanager
+from itertools import chain
 import random
 from typing import Literal, cast, overload
 
@@ -28,6 +29,39 @@ from .items import Object
 from .util import Pipeline, Redis, randstr
 
 class Space:
+    """TODO.
+
+    .. data:: RESOURCES
+
+       Available types of resources.
+
+    .. data:: COSTS
+
+       TODO.
+    """
+
+    RESOURCES = ['🥕', '🪨', '🪵', '🧶']
+    COSTS = {
+        # Tools
+        '🪓': ['🪨'], # S, 1 d
+        '✂️': ['🪨', '🪨', '🪨'],  # S, 3 d
+        '🍳': ['🪨', '🪨', '🪨', '🪨'], # S, 4 d
+        '🚿': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M, 4 d
+        # Toys
+        '🪃': ['🪵', '🪵'], # S, 2 d
+        '⚾': ['🪵', '🧶', '🧶', '🧶'], # S, 3 d
+        '🧸': ['🧶', '🧶', '🧶', '🧶'], # S, 4 d
+        # Furniture
+        '🛋️': ['🪨', '🪵', '🪵', '🪵', '🪵', '🧶', '🧶', '🧶', '🧶'], # L, 4 d
+        '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'],  # M, 4 d
+        '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L, 7 d
+        # Devices
+        '📺': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M 4 d
+        # Miscellaneous
+        '🗞️': ['🪵', '🪵', '🧶', '🧶'], # S, 2 d
+        '🎨': ['🪵', '🪵', '🪵', '🪨', '🧶', '🧶', '🧶'] # M, 3 d
+    }
+
     INTERVAL_S = 7
     MEADOW_VEGETABLE_GROWTH_MAX = 7
     WOODS_GROWTH_MAX = 7
@@ -77,6 +111,7 @@ class Space:
         return await context.bot.get().get_object(self.pet_activity_id)
 
     async def tick(self, time: int) -> Space:
+        """Simulate space at *time*."""
         bot = context.bot.get()
 
         async with bot.redis.pipeline() as pipe:
@@ -90,10 +125,6 @@ class Space:
             if space.time == time:
                 pet_activity_id = random.choice(['', '💤', '🍃', *furniture_ids])
                 pet_nutrition = max(space.pet_nutrition - 1, 0)
-                if pet_nutrition == 0 and space.pet_nutrition == 1:
-                    # print(f'{space.id}:pet-mood-change')
-                    from .actions import say
-                    bot.send_message(space, f'🍽️🐕 {space.pet_name} is hungry. {say()}')
                 pipe.hset(self.id, mapping={
                     'meadow_vegetable_growth':
                         min(space.meadow_vegetable_growth + 1, self.MEADOW_VEGETABLE_GROWTH_MAX),
@@ -103,6 +134,8 @@ class Space:
                     'pet_activity_id': pet_activity_id
                 })
                 pipe.hincrby(self.id, 'time', 1)
+                if pet_nutrition == 0 and space.pet_nutrition == 1:
+                    pipe.rpush('events', f'pet-hungry {self.id}')
             pipe.hgetall(self.id)
 
             data = await cast(Awaitable[list[dict[str, str]]], pipe.execute())
@@ -118,6 +151,30 @@ class Space:
             await obj.use()
 
         return space
+
+    # clean
+
+    async def obtain(self, *resources: str) -> None:
+        """Obtain the given *resources*.
+
+        Only available in debug mode.
+        """
+        bot = context.bot.get()
+        if not bot.debug:
+            raise ValueError('Disabled bot debug mode')
+        for resource in resources:
+            if resource not in self.RESOURCES:
+                raise ValueError(f'Unknown resources item {resource}')
+
+        async with bot.redis.pipeline() as pipe:
+            await pipe.watch(self.id)
+            stock = (await pipe.hget(self.id, 'resources') or '').split()
+            pipe.multi()
+            stock = sorted(chain(stock, resources), key=self._resource_order)
+            pipe.hset(self.id, 'resources', ' '.join(stock))
+            await pipe.execute()
+
+    # /clean
 
     async def gather_meadow(self) -> list[str]:
         async with transaction(context.bot.get().redis, self.id) as pipe:
@@ -176,7 +233,7 @@ class Space:
     async def craft(self, typ: str) -> Object | str:
         bot = context.bot.get()
         try:
-            cost = bot.costs[typ]
+            cost = self.COSTS[typ]
         except KeyError as e:
             raise ValueError(f'Unknown typ {typ}') from e
         if typ in bot.object_types:

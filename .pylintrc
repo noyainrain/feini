@@ -1,0 +1,42 @@
+[messages control]
+disable=
+    # Good design is best figured out by humans (yet)
+    design,
+#    too-many-lines,
+#    too-many-nested-blocks,
+#    # Fails for Generic (see https://github.com/PyCQA/pylint/issues/2717)
+#    duplicate-bases,
+#    # Arguments should not be manipulated anyway
+#    dangerous-default-value,
+#    # There are built-ins with common names like id
+#    redefined-builtin
+    # Handled by mypy
+    typecheck
+
+[reports]
+output-format=colorized
+
+[basic]
+# Remove length constraint, short and long names have their use
+# https://github.com/PyCQA/pylint/blob/main/pylint/checkers/base.py
+argument-rgx=([^\W\dA-Z][^\WA-Z]*|_[^\WA-Z]*|__[^\WA-Z\d_][^\WA-Z]*__)$
+attr-rgx=%(argument-rgx)s
+#class-rgx
+#  class-naming-style Default: PascalCase
+#  class-rgx=[A-Z_][a-zA-Z0-9]*$
+#class-const-rgx
+#  class-const-naming-style Default: UPPER_CASE
+#const-rgx
+#  const-naming-style Default: UPPER_CASE
+function-rgx=%(argument-rgx)s
+method-rgx=%(argument-rgx)s
+module-rgx=%(argument-rgx)s
+variable-rgx=%(argument-rgx)s
+
+#[format]
+## Long URLs and strings may be more readable
+#ignore-long-lines=://|'.+'|".+"
+
+#[classes] # <- maybe this is also mypy now
+## Add initialize, it is used by Tornado
+#defining-attr-methods=__init__,__new__,setUp,initialize

@@ -12,9 +12,22 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.
 # If not, see <https://www.gnu.org/licenses/>.
 
+# pylint: disable=missing-docstring
+
 from unittest import TestCase
 
-from feini.util import isemoji
+from aiohttp import ClientResponseError, web
+from aiohttp.test_utils import AioHTTPTestCase
+from aiohttp.web import Application, HTTPNotImplemented, Request, Response
+
+from feini.util import JSONObject, isemoji, raise_for_status, truncate
+
+class TruncateTest(TestCase):
+    def test(self) -> None:
+        self.assertEqual(truncate('Meow! Meow!', 5), 'Meow…')
+
+    def test_short_text(self) -> None:
+        self.assertEqual(truncate('Meow!', 5), 'Meow!')
 
 class IsEmojiTest(TestCase):
     def test(self) -> None:
@@ -28,3 +41,31 @@ class IsEmojiTest(TestCase):
 
     def test_string(self) -> None:
         self.assertFalse(isemoji('⭐A'))
+
+class RaiseForStatusTest(AioHTTPTestCase):
+    @staticmethod
+    async def index(request: Request) -> Response:
+        raise HTTPNotImplemented(text='Not  implemented')
+
+    async def get_application(self) -> Application:
+        app = Application()
+        app.add_routes([web.get('/', self.index)])
+        return app
+
+    async def test(self) -> None:
+        response = await self.client.get('/')
+        with self.assertRaisesRegex(ClientResponseError, 'Not implemented'):
+            await raise_for_status(response)
+
+class JSONObjectTest(TestCase):
+    def setUp(self) -> None:
+        self.cat = JSONObject(name='Happy Cat')
+
+    def test_get(self) -> None:
+        self.assertEqual(self.cat.get('name', cls=str), 'Happy Cat')
+
+    def test_get_bad_item_type(self) -> None:
+        with self.assertRaisesRegex(TypeError, 'name'):
+            self.cat.get('name', cls=int)
+
+# /clean

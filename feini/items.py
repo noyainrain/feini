@@ -41,6 +41,7 @@ class Plant(Object):
         if time % 24 == 0:
             await context.bot.get().redis.hset(self.id, 'state', random.choice(['🪴', '🌺']))
 
+# https://developers.themoviedb.org/3/getting-started/popularity
 class Television(Object):
     # https://www.rottentomatoes.com/browse/tv-list-2
     SHOWS = [

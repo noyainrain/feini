@@ -1,9 +1,12 @@
+# pylint: disable=missing-docstring
+
 from unittest import IsolatedAsyncioTestCase
 
-from feini.bot import Bot, Space
 from feini import context
+from feini.bot import Bot
 from feini.context import bot
 from feini.items import Plant
+from feini.space import Space
 
 #class FeiniTestCase(IsolatedAsyncioTestCase):
 #    async def asyncSetUp(self) -> None:
@@ -11,17 +14,20 @@ from feini.items import Plant
 
 class FeiniTestCase(IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        self.bot = Bot()
+        self.bot = Bot(debug=True)
         context.bot.set(self.bot)
         self.space = await self.bot.create_space('local')
+
+    async def asyncTearDown(self) -> None:
+        await self.bot.close()
 
     async def obtain(self, resources: list[str]) -> None:
         space = await self.bot.get_space(self.space.id)
         if '🪵'  in resources and '🪓' not in space.tools:
-            await self.obtain(self.bot.costs['🪓'])
+            await self.obtain(Space.COSTS['🪓'])
             await space.craft('🪓')
         if '🧶' in resources and '✂️' not in space.tools:
-            await self.obtain(self.bot.costs['✂️'])
+            await self.obtain(Space.COSTS['✂️'])
             await space.craft('✂️')
 
         resources = list(resources)
@@ -63,6 +69,16 @@ class SpaceTest(FeiniTestCase):
         else:
             self.fail()
 
+    # clean
+
+    async def test_obtain(self) -> None:
+        await self.space.obtain('🪵', '🧶', '🥕')
+        await self.space.obtain('🪵')
+        space = await self.space.get()
+        self.assertEqual(space.resources, ['🥕', '🪵', '🪵', '🧶']) # type: ignore[misc]
+
+    # /clean
+
     async def test_feed_pet(self) -> None:
         await self.space.gather_meadow()
         await self.space.feed_pet()
@@ -93,7 +109,7 @@ class SpaceTest(FeiniTestCase):
         self.assertFalse(resources)
 
     async def test_chop_wood(self) -> None:
-        await self.obtain(self.bot.costs['🪓'])
+        await self.obtain(Space.COSTS['🪓'])
         await self.space.craft('🪓')
         wood = await self.space.chop_wood()
         space = await self.bot.get_space(self.space.id)
@@ -104,7 +120,7 @@ class SpaceTest(FeiniTestCase):
     # test_chop_woods empty
 
     async def test_use_scissors(self) -> None:
-        await self.obtain(self.bot.costs['✂️'])
+        await self.obtain(Space.COSTS['✂️'])
         await self.space.craft('✂️')
         wool = await self.space.use('✂️')
         space = await self.bot.get_space(self.space.id)
@@ -113,14 +129,14 @@ class SpaceTest(FeiniTestCase):
         self.assertEqual(space.pet_fur, 0)
 
     async def test_use_scissors_no_pet_fur(self) -> None:
-        await self.obtain(self.bot.costs['✂️'])
+        await self.obtain(Space.COSTS['✂️'])
         await self.space.craft('✂️')
         await self.space.use('✂️')
         wool = await self.space.use('✂️')
         self.assertFalse(wool)
 
     async def test_craft(self) -> None:
-        await self.obtain(self.bot.costs['🪓'])
+        await self.obtain(Space.COSTS['🪓'])
         axe = await self.space.craft('🪓')
         space = await bot.get().get_space(self.space.id)
         self.assertEqual(axe, '🪓')
@@ -128,7 +144,7 @@ class SpaceTest(FeiniTestCase):
         self.assertEqual(space.resources, ['🥕']) # type: ignore[misc]
 
     async def test_craft_home_item(self) -> None:
-        await self.obtain(self.bot.costs['🪴'])
+        await self.obtain(Space.COSTS['🪴'])
         plant = await self.space.craft('🪴')
         space = await bot.get().get_space(self.space.id)
         self.assertIsInstance(plant, Plant)

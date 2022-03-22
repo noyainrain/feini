@@ -1,9 +1,10 @@
 from feini.items import Newspaper, Plant, Palette, Television
+from feini.space import Space
 from .test_space import FeiniTestCase
 
 class PlantTest(FeiniTestCase):
     async def test_tick(self) -> None:
-        await self.obtain(self.bot.costs['🪴'])
+        await self.obtain(Space.COSTS['🪴'])
         plant = await self.space.craft('🪴')
         assert isinstance(plant, Plant)
 
@@ -18,7 +19,7 @@ class PlantTest(FeiniTestCase):
 
 class TelevisionTest(FeiniTestCase):
     async def test_use(self) -> None:
-        await self.obtain(self.bot.costs['📺'])
+        await self.obtain(Space.COSTS['📺'])
         tv = await self.space.craft('📺')
         assert isinstance(tv, Television)
         show = tv.show
@@ -34,7 +35,7 @@ class TelevisionTest(FeiniTestCase):
 
 class NewspaperTest(FeiniTestCase):
     async def test_use(self) -> None:
-        await self.obtain(self.bot.costs['🗞️'])
+        await self.obtain(Space.COSTS['🗞️'])
         newspaper = await self.space.craft('🗞️')
         assert isinstance(newspaper, Newspaper)
         article = newspaper.article
@@ -51,7 +52,7 @@ class NewspaperTest(FeiniTestCase):
 
 class PaletteTest(FeiniTestCase):
     async def test_tick(self) -> None:
-        await self.obtain(self.bot.costs['🎨'])
+        await self.obtain(Space.COSTS['🎨'])
         palette = await self.space.craft('🎨')
         assert isinstance(palette, Palette)
 
