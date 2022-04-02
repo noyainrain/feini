@@ -14,10 +14,13 @@
 
 """Player actions."""
 
+# pylint: disable=missing-function-docstring
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from functools import partial
+from gettext import NullTranslations
 from inspect import getmembers
 import random
 from random import randint
@@ -27,10 +30,12 @@ import unicodedata
 
 from . import context
 from .items import Newspaper, Object, Palette, Plant, Television
-from .space import Space
+from .space import Hike, Space
 from .util import isemoji
 
 _M = TypeVar('_M', bound='Mode', contravariant=True)
+
+ngettext = NullTranslations().ngettext
 
 class _ActionCallable(Protocol[_M]):
     async def __call__(_, self: _M, space: Space, *args: str) -> str:
@@ -138,7 +143,8 @@ def entity_action(entity_type: str) -> Callable[[_EntityActionCallable], Action[
 
 class MainMode(Mode):
     """Main chat mode."""
-    # pylint: disable=missing-docstring,no-self-use,unused-argument
+
+    # pylint: disable=no-self-use,unused-argument
 
     # /clean
 
@@ -207,9 +213,9 @@ class MainMode(Mode):
         except ValueError as e:
             if 'typ' in str(e):
                 tools = '\n'.join(f"{typ}: {''.join(cost)}"
-                                  for typ, cost in list(space.COSTS.items())[:4])
+                                  for typ, cost in list(space.COSTS.items())[:5])
                 furniture = '\n'.join(f"{typ}: {''.join(cost)}"
-                                      for typ, cost in list(space.COSTS.items())[4:])
+                                      for typ, cost in list(space.COSTS.items())[5:])
                 return f'🔨 ⬜Item\nCraft an item.\n\nTools:\n{tools}\nFurniture:\n{furniture}'
                 #catalog = '\n'.join(
                 #    f"{typ}: {''.join(cost)}" for typ, cost in bot.costs.items())
@@ -219,6 +225,26 @@ class MainMode(Mode):
             raise
 
     # clean
+
+    @item_action('🧭')
+    async def hike(self, space: Space, *args: str) -> str:
+        mode = HikeMode(await space.hike())
+        context.bot.get().set_mode(space.chat, mode)
+        return await mode.default(space)
+
+    async def _try_hike(self, space: Space, *args: str) -> str:
+        return 'You could use a compass 🧭 to hike.'
+
+    try_hike = action('➡️')(_try_hike)
+    _try_hike_move_south = action('⬇️')(_try_hike)
+    _try_hike_move_west = action('⬅️')(_try_hike)
+    _try_hike_move_north = action('⬆️')(_try_hike)
+    _try_hike_stop = action('🔙')(_try_hike)
+    _try_hike_green = action('🟩')(_try_hike)
+    _try_hike_origin = action('✴️')(_try_hike)
+    _try_hike_tree_a = action('🌲')(_try_hike)
+    _try_hike_tree_b = action('🌳')(_try_hike)
+    _try_hike_destination = action('📍')(_try_hike)
 
     @entity_action('🪃')
     async def view_boomerang(self, space: Space, entity: Object, *args: str) -> str:
@@ -323,6 +349,89 @@ class MainMode(Mode):
     async def default(self, space: Space, *args: str) -> str:
         word = args[0] if isemoji(args[0]) else f'“{args[0]}”'
         return f'You have no {word} at the moment. Maybe have a look in the tent ⛺?'
+
+class HikeMode(Mode):
+    """Hike minigame chat mode.
+
+    .. attribute:: hike
+
+       Active hike.
+    """
+
+    # pylint: disable=unused-argument
+
+    def __init__(self, hike: Hike) -> None:
+        super().__init__()
+        self.hike = hike
+
+    async def _move(self, space: Space, *args: str) -> str:
+        try:
+            move = await self.hike.move(args)
+        except ValueError as e:
+            if 'directions' in str(e):
+                return await self.default(space)
+            raise
+
+        emoji = ''.join(item for step in move for item in step)
+
+        end = move[-1][1]
+        parts = []
+        if end in Hike.GROUND:
+            parts.append(
+                random.choice([
+                    "Apparently that wasn't the right way. 😵‍💫",
+                    "You missed a turn somewhere. 😵‍💫"
+                ]))
+        elif end in Hike.TREES:
+            parts.append(
+                random.choice([
+                    f'{space.pet_name} was blocked by a tree.',
+                    f'{space.pet_name} got stuck in the thicket.'
+                ]))
+        elif end == '📍':
+            moves = len(self.hike.moves)
+            parts.append(
+                ngettext(
+                    'You finished the hike in 1 move. 🥳',
+                    'You finished the hike in {moves} moves. 🥳', moves
+                ).format(moves=moves))
+        else:
+            assert False
+        if any(field == self.hike.resource for _, field in move):
+            parts.append(
+                random.choice([
+                    f'{space.pet_name} found a {self.hike.resource}. 😊',
+                    f'{space.pet_name} fetched a {self.hike.resource} en route. 😊'
+                ]))
+
+        trail = ''
+        if self.hike.finished:
+            context.bot.get().set_mode(space.chat, MainMode())
+            trail = f'\n\n{self.hike}'
+
+        return f"🐕{emoji} {' '.join(parts)}{trail}"
+
+    move = action('➡️')(_move)
+    _move_south = action('⬇️')(_move)
+    _move_west = action('⬅️')(_move)
+    _move_north = action('⬆️')(_move)
+
+    @action('🔙')
+    async def stop(self, space: Space, *args: str) -> str:
+        context.bot.get().set_mode(space.chat, MainMode())
+        moves = len(self.hike.moves)
+        text = ngettext(
+            'You returned home after 1 move.', 'You returned home after {moves} moves.', moves
+        ).format(moves=moves)
+        return f'🐕🔙 {text}\n\n{self.hike}'
+
+    async def default(self, space: Space, *args: str) -> str:
+        return dedent("""\
+            🧭 Hike: Navigate the trail and find your destination 📍.
+
+            ⬆️➡️⬇️⬅️: Move four steps in the given direction, e.g. ⬅️⬆️⬆️⬅️. Every move starts from the same spot.
+            🔙: Return home.
+        """)
 
 # Style guide: TODO. feelings described from oustide, e.g. looks hungry instead of is hungry. exceptions
 # for simplicity for describing verbs, e.g. drawing passionetly or if it is a verb e.g. likes
@@ -508,6 +617,11 @@ async def pet_hungry_message(space: Space) -> str:
 @event_message('pet-dirty')
 async def pet_dirty_message(space: Space) -> str:
     return pet_message(f'{space.pet_name} is pretty dirty.', focus='💩')
+
+@event_message('space-stroll-compass-blueprint')
+async def space_stroll_compass_blueprint_message(space: Space) -> str:
+    return pet_message(f'{space.pet_name} was digging and found a compass blueprint.', focus='📋',
+                       mood='😊')
 
 @event_message('space-stroll-sponge')
 async def space_stroll_sponge_message(space: Space) -> str:

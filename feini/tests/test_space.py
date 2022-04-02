@@ -1,12 +1,29 @@
+# Open Feini
+# Copyright (C) 2022 Open Feini contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.
+# If not, see <https://www.gnu.org/licenses/>.
+
 # pylint: disable=missing-docstring
 
+# /clean
+
+from itertools import cycle, islice
 from unittest import IsolatedAsyncioTestCase
 
 from feini import context
 from feini.bot import Bot
 from feini.context import bot
 from feini.items import Plant
-from feini.space import Space
+from feini.space import Hike, Space
 
 #class FeiniTestCase(IsolatedAsyncioTestCase):
 #    async def asyncSetUp(self) -> None:
@@ -55,21 +72,21 @@ class FeiniTestCase(IsolatedAsyncioTestCase):
             #    break
             #await space.tick(space.time)
 
-class SpaceTest(FeiniTestCase):
-    #bot: Bot
-    #space: Space
+# clean
 
+class SpaceTest(FeiniTestCase):
     async def test_tick(self) -> None:
-        space = self.space
+        await self.space.tick(self.space.time)
+        space = await self.space.get()
+        self.assertEqual(space.trail_supply, Space.TRAIL_SUPPLY_FULL + 1)
+
         for _ in range(1000):
-            await space.tick(space.time)
-            space = await self.bot.get_space(self.space.id)
             if space.pet_activity_id != '':
                 break
+            await space.tick(space.time)
+            space = await space.get()
         else:
             self.fail()
-
-    # clean
 
     async def test_obtain(self) -> None:
         await self.space.obtain('🪵', '🧶', '🥕')
@@ -144,12 +161,12 @@ class SpaceTest(FeiniTestCase):
         self.assertEqual(space.resources, ['🥕']) # type: ignore[misc]
 
     async def test_craft_home_item(self) -> None:
-        await self.obtain(Space.COSTS['🪴'])
+        await self.space.obtain(*Space.COSTS['🪴'])
         plant = await self.space.craft('🪴')
-        space = await bot.get().get_space(self.space.id)
+        space = await self.space.get()
         self.assertIsInstance(plant, Plant)
         self.assertEqual(await space.get_objects(), [plant]) # type: ignore[misc]
-        self.assertEqual(space.resources, ['🥕', '🥕', '🥕']) # type: ignore[misc]
+        self.assertFalse(space.resources)
 
     async def test_craft_no_resources(self) -> None:
         with self.assertRaisesRegex(ValueError, 'resources'):
@@ -174,3 +191,52 @@ class PetTest(FeiniTestCase):
         await self.pet.wash()
         with self.assertRaisesRegex(ValueError, 'dirt'):
             await self.pet.wash()
+
+# clean
+
+class HikeTest(FeiniTestCase):
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        await self.space.obtain(*Space.COSTS['🧭'])
+        await self.space.craft('🧭')
+        self.hike = await self.space.hike()
+
+    @staticmethod
+    def pad_directions(directions: list[str]) -> list[str]:
+        direction = directions[-1]
+        reverse = {'➡️': '⬅️', '⬇️': '⬆️', '⬅️': '➡️', '⬆️': '⬇️'}[direction]
+        return directions + list(islice(cycle((reverse, direction)), Hike.RADIUS - len(directions)))
+
+    async def test_move(self) -> None:
+        directions = self.pad_directions(self.hike.find_path('🟩'))
+        move = await self.hike.move(directions)
+        self.assertEqual(move, list(zip(directions, ['🟩', '✴️', '🟩', '✴️']))) # type: ignore[misc]
+        self.assertFalse(self.hike.finished)
+
+    async def test_move_destination(self) -> None:
+        assert self.hike.resource
+        await self.hike.move(self.pad_directions(self.hike.find_path(self.hike.resource)))
+        await self.hike.move(self.hike.find_path('📍'))
+        space = await self.space.get()
+        self.assertTrue(self.hike.finished)
+        self.assertEqual(self.hike.gathered, [self.hike.resource]) # type: ignore[misc]
+        self.assertEqual(space.resources, [self.hike.resource]) # type: ignore[misc]
+        self.assertEqual(space.trail_supply, 0)
+
+    async def test_move_destination_empty_space_trail_supply(self) -> None:
+        assert self.hike.resource
+        await self.hike.move(self.pad_directions(self.hike.find_path(self.hike.resource)))
+        await self.hike.move(self.hike.find_path('📍'))
+        hike = await self.space.hike()
+
+        await hike.move(hike.find_path('📍'))
+        space = await self.space.get()
+        self.assertFalse(hike.gathered)
+        self.assertFalse(space.resources[1:])
+        self.assertEqual(space.trail_supply, 0)
+
+    async def test_move_bad_directions_length(self) -> None:
+        with self.assertRaisesRegex(ValueError, 'directions'):
+            await self.hike.move([])
+
+# /clean

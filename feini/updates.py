@@ -1,11 +1,43 @@
-from __future__ import annotations
+# Open Feini
+# Copyright (C) 2022 Open Feini contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.
+# If not, see <https://www.gnu.org/licenses/>.
 
-from collections.abc import Awaitable, Callable
-from functools import partial
+"""Database updates, ordered from latest to earliest."""
+
+# pylint: disable=missing-function-docstring
+
+# Note that updates are applied before the bot is started, thus there are no race conditions.
+
 from logging import getLogger
 
 from . import context
+from .space import Space
 from .util import randstr
+
+async def update_space_trail_supply() -> None:
+    updates = 0
+    bot = context.bot.get()
+    for space_id in await bot.redis.hvals('spaces_by_chat'):
+        if not await bot.redis.hexists(space_id, 'trail_supply'):
+            async with bot.redis.pipeline() as pipe:
+                pipe.hset(space_id, 'trail_supply', Space.TRAIL_SUPPLY_FULL)
+                pipe.rpush('events', f'space-stroll-compass-blueprint {space_id}')
+                await pipe.execute()
+                updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Space.trail_supply (%d)', updates)
+
+# /clean
 
 # UpdateFunction = Callable[[], Awaitable[None]]
 

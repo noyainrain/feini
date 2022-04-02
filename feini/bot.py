@@ -32,9 +32,9 @@ from urllib.parse import urljoin
 
 from aiohttp import ClientError, ClientPayloadError, ClientSession, ClientTimeout
 
-from .actions import (MainMode, view_sleep, view_leaves, view_boomerang, view_ball, view_teddy,
-                      view_couch, view_plant, view_fountain, view_television, view_newspaper,
-                      view_palette)
+from .actions import (
+    MainMode, Mode, view_sleep, view_leaves, view_boomerang, view_ball, view_teddy, view_couch,
+    view_plant, view_fountain, view_television, view_newspaper, view_palette)
 from . import actions, context, updates
 from .items import Newspaper, Object, Plant, Palette, Television
 from .space import Pet, Space
@@ -105,6 +105,7 @@ class Bot:
         self.http = ClientSession(timeout=ClientTimeout(total=20))
         self.telegram = Telegram(telegram_key) if telegram_key else None
 
+        self._chat_modes: dict[str, Mode] = {}
         self._outbox: Queue[Message] = Queue()
 
         # TODO move to actions / mode
@@ -131,7 +132,8 @@ class Bot:
         #        return _EMOJI_VARIANTS[emoji]
         #    except KeyError:
         #        return emoji
-        # see https://unicode.org/emoji/charts/emoji-variants.html
+        # https://unicode.org/emoji/charts/text-style.html
+        # https://unicode.org/emoji/charts/emoji-list.html
         alternatives = {
             '👋': ['👋\N{VARIATION SELECTOR-16}', '🤚', '🤚\N{VARIATION SELECTOR-16}', '🖐️', '🖐︎',
                    '✋', '✋\N{VARIATION SELECTOR-16}'],
@@ -145,7 +147,12 @@ class Bot:
             '⛲': ['⛲\N{VARIATION SELECTOR-16}'],
             '📺': ['📺\N{VARIATION SELECTOR-16}'],
             '🗞️': ['🗞', '📰'],
-            '⛺': ['⛺\N{VARIATION SELECTOR-16}', '🏕️', '🏕']
+            '⛺': ['⛺\N{VARIATION SELECTOR-16}', '🏕️', '🏕'],
+            '➡️': ['➡', '➡\N{VARIATION SELECTOR-15}'],
+            '⬇️': ['⬇', '⬇\N{VARIATION SELECTOR-15}'],
+            '⬅️': ['⬅', '⬅\N{VARIATION SELECTOR-15}'],
+            '⬆️': ['⬆', '⬆\N{VARIATION SELECTOR-15}'],
+            '🔙': ['🔚']
         }
         self.alternatives = {
             alt: can for can, alts in alternatives.items() for alt in alts
@@ -181,6 +188,17 @@ class Bot:
         except CancelledError:
             pass
         await self.http.close()
+
+    def get_mode(self, chat: str) -> Mode:
+        """Get the current mode of *chat*."""
+        return self._chat_modes.get(chat) or MainMode()
+
+    def set_mode(self, chat: str, mode: Mode) -> None:
+        """Set the current *mode* of *chat*."""
+        if isinstance(mode, MainMode):
+            self._chat_modes.pop(chat, None)
+        else:
+            self._chat_modes[chat] = mode
 
     def send(self, message: Message) -> None:
         """Send a *message*."""
@@ -229,7 +247,7 @@ class Bot:
 
     async def update(self) -> None:
         from inspect import iscoroutinefunction, signature
-        for name, f in cast(dict[str, object], vars(updates)).items():
+        for name, f in reversed(cast(dict[str, object], vars(updates)).items()):
             if name.startswith('update_'):
                 assert iscoroutinefunction(f) and not signature(f).parameters # type: ignore[arg-type]
                 await cast(Callable[[], Awaitable[None]], f)()
@@ -342,7 +360,7 @@ class Bot:
         tokens = self._parse(action)
         tokens = [self.alternatives.get(token, token) for token in tokens]
 
-        reply = await MainMode().perform(space, *tokens)
+        reply = await self.get_mode(chat).perform(space, *tokens)
         create_task(Story().update(space))
 
         logger.info('%s (%s): %s', chat, space.pet_name, ' '.join(tokens))
@@ -369,6 +387,7 @@ class Bot:
                 'tools': '👋 ✏️ 🔨 🧺 🧽',
                 'meadow_vegetable_growth': str(Space.MEADOW_VEGETABLE_GROWTH_MAX),
                 'woods_growth': str(Space.WOODS_GROWTH_MAX),
+                'trail_supply': str(Space.TRAIL_SUPPLY_FULL),
                 'pet_id': pet_id,
                 'pet_name': 'Feini',
                 'pet_is_egg': 'true',

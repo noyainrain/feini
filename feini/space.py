@@ -16,20 +16,31 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Iterable
+from collections import deque
+from collections.abc import AsyncIterator, Awaitable, Collection, Iterable
 from contextlib import asynccontextmanager
 from itertools import chain
 import random
+from random import randint, shuffle
+import sys
 from typing import Literal, cast, overload
 
 from aioredis.exceptions import WatchError
 
 from . import context
 from .items import Object
-from .util import Pipeline, Redis, randstr
+from .util import Pipeline, Redis, isemoji, randstr
 
 class Space:
     """TODO.
+
+    .. attribute:: trail_supply
+
+       Current hiking trail resource supply level.
+
+    .. attribute:: pet_nutrition
+
+       Current pet nutrition level.
 
     .. data:: RESOURCES
 
@@ -38,33 +49,39 @@ class Space:
     .. data:: COSTS
 
        TODO.
+
+    .. data:: TRAIL_SUPPLY_FULL
+
+       Level at which a resource is in supply on the trail.
     """
 
     RESOURCES = ['🥕', '🪨', '🪵', '🧶']
     COSTS = {
         # Tools
-        '🪓': ['🪨'], # S, 1 d
-        '✂️': ['🪨', '🪨', '🪨'],  # S, 3 d
-        '🍳': ['🪨', '🪨', '🪨', '🪨'], # S, 4 d
-        '🚿': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M, 4 d
+        '🪓': ['🪨'], # S
+        '✂️': ['🪨', '🪨', '🪨'], # S
+        '🍳': ['🪨', '🪨', '🪨', '🪨', '🪵'], # S
+        '🚿': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
+        '🧭': ['🪨', '🪨', '🪨', '🪨'], # S
         # Toys
-        '🪃': ['🪵', '🪵'], # S, 2 d
-        '⚾': ['🪵', '🧶', '🧶', '🧶'], # S, 3 d
-        '🧸': ['🧶', '🧶', '🧶', '🧶'], # S, 4 d
+        '🪃': ['🪵', '🪵'], # S
+        '⚾': ['🪵', '🧶', '🧶', '🧶'], # S
+        '🧸': ['🧶', '🧶', '🧶', '🧶'], # S
         # Furniture
-        '🛋️': ['🪨', '🪵', '🪵', '🪵', '🪵', '🧶', '🧶', '🧶', '🧶'], # L, 4 d
-        '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'],  # M, 4 d
-        '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L, 7 d
+        '🛋️': ['🪨', '🪵', '🪵', '🪵', '🪵', '🧶', '🧶', '🧶', '🧶'], # L
+        '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵', '🧶'], # M
+        '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L
         # Devices
-        '📺': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M 4 d
+        '📺': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
         # Miscellaneous
-        '🗞️': ['🪵', '🪵', '🧶', '🧶'], # S, 2 d
-        '🎨': ['🪵', '🪵', '🪵', '🪨', '🧶', '🧶', '🧶'] # M, 3 d
+        '🗞️': ['🪵', '🪵', '🧶', '🧶'], # S
+        '🎨': ['🪵', '🪵', '🪵', '🪨', '🧶', '🧶', '🧶'] # M
     }
 
     INTERVAL_S = 7
     MEADOW_VEGETABLE_GROWTH_MAX = 7
     WOODS_GROWTH_MAX = 7
+    TRAIL_SUPPLY_FULL = 23
     PET_NUTRITION_MAX = 25
     PET_FUR_MAX = 7
 
@@ -80,6 +97,7 @@ class Space:
         self.tools = data['tools'].split()
         self.meadow_vegetable_growth = int(data['meadow_vegetable_growth'])
         self.woods_growth = int(data['woods_growth'])
+        self.trail_supply = int(data['trail_supply'])
         self.pet_id = data['pet_id']
         self.pet_name = data['pet_name']
         self.pet_is_egg = bool(data['pet_is_egg'])
@@ -133,6 +151,7 @@ class Space:
                     'pet_fur': min(space.pet_fur + 1, self.PET_FUR_MAX),
                     'pet_activity_id': pet_activity_id
                 })
+                pipe.hincrby(self.id, 'trail_supply', 1)
                 pipe.hincrby(self.id, 'time', 1)
                 if pet_nutrition == 0 and space.pet_nutrition == 1:
                     pipe.rpush('events', f'pet-hungry {self.id}')
@@ -307,6 +326,43 @@ class Space:
             data = await cast(Awaitable[list[dict[str, str]]], pipe.execute())
             return Space(data[-1])
 
+    # clean
+
+    async def hike(self) -> Hike:
+        """Start a hike.
+
+        A compass 🧭 is required.
+        """
+        space = Space(await context.bot.get().redis.hgetall(self.id))
+        if '🧭' not in space.tools:
+            raise ValueError('No tools item 🧭')
+        resource = (random.choice(['🥕', '🪨']) if space.trail_supply >= self.TRAIL_SUPPLY_FULL
+                    else None)
+        return Hike(self, resource=resource)
+
+    async def record_hike(self, hike: Hike) -> None:
+        """Record a finished *hike*.
+
+        Any :attr:`Hike.gathered` resources are stored.
+        """
+        if not hike.finished:
+            raise ValueError('Unfinished hike')
+
+        async with context.bot.get().redis.pipeline() as pipe:
+            await pipe.watch(self.id)
+            space = Space(await pipe.hgetall(self.id))
+            pipe.multi()
+            if '🧭' not in space.tools:
+                raise ValueError('No tools item 🧭')
+            if hike.gathered:
+                if space.trail_supply < self.TRAIL_SUPPLY_FULL:
+                    raise ValueError('Empty trail_supply')
+                resources = sorted(space.resources + hike.gathered, key=self._resource_order)
+                pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'trail_supply': 0})
+            await pipe.execute()
+
+    # /clean
+
     # TODO later: cook
     # TODO later: website
     # - after crafting furniture, set activity to new object - show std touch msg or something like
@@ -342,6 +398,208 @@ class Pet:
                 raise ValueError('No dirt')
             pipe.hset(self.id, 'dirt', 0)
             await pipe.execute()
+
+# clean
+
+class Hike:
+    """Hike minigame.
+
+    .. attribute:: space
+
+       Related space.
+
+    .. attribute:: map
+
+       Grid of fields.
+
+    .. attribute:: moves
+
+       Moves the player made so far. A move is a list of steps, where each step is a direction
+       (➡️⬇️⬅️⬆️.) along with the encountered field.
+
+    .. attribute:: resource
+
+       Resource available on the hike. May be ``None``.
+
+    .. attribute:: gathered
+
+       Resources the player has gathered so far.
+
+    .. data:: RADIUS
+
+       Radius of the map.
+
+    .. data:: GROUND
+
+       Ground fields.
+
+    .. data:: TREES
+
+       Tree fields.
+    """
+
+    RADIUS = 4
+    GROUND = {'🟩', '✴️'}
+    TREES = {'🌲', '🌳'}
+
+    _DISPLACEMENTS = {'➡️': (1, 0), '⬇️': (0, 1), '⬅️': (-1, 0), '⬆️': (0, -1)}
+    _DIRECTIONS = {displacement: direction for direction, displacement in _DISPLACEMENTS.items()}
+
+    def __init__(self, space: Space, *, resource: str | None = None) -> None:
+        if not (resource is None or resource in Space.RESOURCES):
+            raise ValueError('Bad resource')
+
+        self.space = space
+        size = self.RADIUS * 2 + 1
+        self.map = [[''] * size for _ in range(size)]
+        self.resource = resource
+        self.gathered: list[str] = []
+        self.moves: list[list[tuple[str, str]]] = []
+        self._revealed: set[tuple[int, int]] = set()
+        self._generate_map()
+
+    @property
+    def finished(self) -> bool:
+        """Indicates if the player found the destination."""
+        return bool(self.moves and self.moves[-1][-1][1] == '📍')
+
+    def __str__(self) -> str:
+        return self.text()
+
+    async def move(self, directions: Collection[str]) -> list[tuple[str, str]]:
+        """Move :data:`RADIUS` steps in the given *directions*.
+
+        A description of the move is returned. If the destination is reached, the hike is recorded.
+        """
+        if len(directions) != self.RADIUS:
+            raise ValueError(f"Bad directions length [{', '.join(directions)}]")
+        for direction in directions:
+            if direction not in self._DISPLACEMENTS:
+                raise ValueError(f'Bad directions item {direction}')
+        if self.finished:
+            raise ValueError('Finished hike')
+
+        move = []
+        x, y = self.RADIUS, self.RADIUS
+        for direction in directions:
+            dx, dy = self._DISPLACEMENTS[direction]
+            x, y = x + dx, y + dy
+            field = self.map[y][x]
+            move.append((direction, field))
+            self._revealed.add((x, y))
+
+            if field in self.TREES or field == '📍':
+                break
+            if field == self.resource:
+                self.gathered.append(field)
+                self.map[y][x] = '🟩'
+        self.moves.append(move)
+
+        if self.finished:
+            await self.space.record_hike(self)
+        return move
+
+    def find_path(self, field: str) -> list[str]:
+        """Find directions to *field*.
+
+        If *field* is not reachable, a :exc:`ValueError` is raised.
+        """
+        queue = deque([[(self.RADIUS, self.RADIUS)]])
+        while queue:
+            path = queue.pop()
+            x, y = path[-1]
+            distance = len(path) - 1
+
+            if distance > self.RADIUS:
+                continue
+            if path.count((x, y)) > 1:
+                continue
+            if self.map[y][x] == field:
+                return [self._DIRECTIONS[(b[0] - a[0], b[1] - a[1])]
+                        for a, b in zip(path, path[1:])]
+
+            for coords in self._get_adjacents(x, y):
+                queue.appendleft(path + [coords])
+        raise ValueError(f'Unreachable {field}')
+
+    def text(self, *, revealed: bool = False) -> str:
+        """Return a text representation of the map.
+
+        Fields not visited by the player so far are hidden, unless *revealed* is set.
+        """
+        return '\n'.join(
+            ''.join(
+                field if field and ((x, y) in self._revealed or revealed) else '⬜'
+                for x, field in enumerate(row))
+            for y, row in enumerate(self.map))
+
+    def _get_adjacents(self, x: int, y: int) -> list[tuple[int, int]]:
+        return ([] if self.map[y][x] in self.TREES
+                else [(x + dx, y + dy) for dx, dy in self._DISPLACEMENTS.values()])
+
+    def _generate_map(self) -> None:
+        # In taxicab geometry (https://en.wikipedia.org/wiki/Taxicab_geometry), a circle is a
+        # rotated square with half the area of its circumscribed square
+        area = int(len(self.map) ** 2 / 2)
+        distances = self._generate_passable(round(area * 2 / 3))
+        passable = list(distances.items())
+        shuffle(passable)
+        def get_distance(field: tuple[tuple[int, int], int]) -> int:
+            return field[1]
+        passable.sort(key=get_distance)
+
+        # Place trees
+        for y, row in enumerate(self.map):
+            for x, _ in enumerate(row):
+                if abs(self.RADIUS - x) + abs(self.RADIUS - y) <= self.RADIUS:
+                    self.map[y][x] = '🌳' if random.random() < 0.25 else '🌲'
+
+        # Place ground
+        for coords, _ in passable:
+            x, y = coords
+            self.map[y][x] = '🟩'
+
+        # Place origin
+        x, y = passable.pop(0)[0]
+        self.map[y][x] = '✴️'
+        self._revealed.add((x, y))
+
+        # Place destination
+        x, y = passable.pop()[0]
+        self.map[y][x] = '📍'
+        self._revealed.add((x, y))
+
+        # Place resource
+        if self.resource:
+            x, y = random.choice(passable)[0]
+            self.map[y][x] = self.resource
+
+    def _generate_passable(self, count: int) -> dict[tuple[int, int], int]:
+        distances: dict[tuple[int, int], int] = {}
+        bucket = deque([[(self.RADIUS, self.RADIUS)]])
+        while bucket:
+            path = bucket.pop()
+            x, y = path[-1]
+            distance = len(path) - 1
+
+            if distance > self.RADIUS:
+                continue
+            if path.count((x, y)) > 1:
+                continue
+            if sum(coords in path for coords in self._get_adjacents(x, y)) > 1:
+                continue
+            if len(distances) >= count and (x, y) not in distances:
+                continue
+            if distance < distances.get((x, y), sys.maxsize):
+                distances[(x, y)] = distance
+
+            for coords in self._get_adjacents(x, y):
+                # Note that a flat random bucket is slightly biased towards already visited paths.
+                # If needed, this could be improved with a recursive random bucket.
+                bucket.insert(randint(0, len(bucket)), path + [coords])
+        return distances
+
+# /clean
 
 # TODO kill this, use pipe.watch(...) explicityl, do not retry on watch error,
 # just tell the user to try again, it will be so selten, mostly never, really...
