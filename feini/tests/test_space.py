@@ -192,7 +192,24 @@ class PetTest(FeiniTestCase):
         with self.assertRaisesRegex(ValueError, 'dirt'):
             await self.pet.wash()
 
-# clean
+    # clean
+
+    async def test_dress(self) -> None:
+        await self.space.obtain('🎀')
+        await self.pet.dress('🎀')
+        space = await self.space.get()
+        pet = await space.get_pet()
+        self.assertEqual(pet.clothing, '🎀')
+        self.assertFalse(space.resources)
+
+    async def test_dress_no_clothing(self) -> None:
+        await self.space.obtain('🎀')
+        await self.pet.dress('🎀')
+        await self.pet.dress(None)
+        space = await self.space.get()
+        pet = await space.get_pet()
+        self.assertIsNone(pet.clothing)
+        self.assertEqual(space.resources, ['🎀']) # type: ignore[misc]
 
 class HikeTest(FeiniTestCase):
     async def asyncSetUp(self) -> None:

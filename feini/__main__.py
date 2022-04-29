@@ -3,14 +3,22 @@
 """TODO."""
 
 import asyncio
+from asyncio import Task, current_task, get_running_loop
 from asyncio import CancelledError
 from configparser import ConfigParser
 import logging
+from typing import cast
+import signal
 import sys
 
 from .bot import Bot
 
 async def main() -> None:
+    loop = get_running_loop()
+    task = cast(Task[None], current_task())
+    loop.add_signal_handler(signal.SIGINT, task.cancel) # type: ignore[misc]
+    loop.add_signal_handler(signal.SIGTERM, task.cancel) # type: ignore[misc]
+
     logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s: %(message)s',
                         level=logging.INFO)
     config = ConfigParser()
@@ -32,5 +40,5 @@ async def main() -> None:
 if __name__ == '__main__':
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except CancelledError:
         pass

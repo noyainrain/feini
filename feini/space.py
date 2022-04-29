@@ -42,9 +42,13 @@ class Space:
 
        Current pet nutrition level.
 
-    .. data:: RESOURCES
+    .. data:: ITEM_CATEGORIES
 
-       Available types of resources.
+       Available types of items by category.
+
+    .. data:: ITEM_WEIGHTS
+
+       Weights by which items are ordered.
 
     .. data:: COSTS
 
@@ -55,7 +59,17 @@ class Space:
        Level at which a resource is in supply on the trail.
     """
 
-    RESOURCES = ['🥕', '🪨', '🪵', '🧶']
+    ITEM_CATEGORIES = {
+        'resource': ['🥕', '🪨', '🪵', '🧶'],
+        'clothing': ['🕶️', '🎀']
+    }
+
+    ITEM_WEIGHTS = {
+        item:
+            weight for weight, item
+            in enumerate(item for items in ITEM_CATEGORIES.values() for item in items)
+    }
+
     COSTS = {
         # Tools
         '🪓': ['🪨'], # S
@@ -84,10 +98,6 @@ class Space:
     TRAIL_SUPPLY_FULL = 23
     PET_NUTRITION_MAX = 25
     PET_FUR_MAX = 7
-
-    @staticmethod
-    def _resource_order(resource: str) -> int:
-        return {'🥕': 0, '🪨': 1, '🪵': 2, '🧶': 3}[resource]
 
     def __init__(self, data: dict[str, str]) -> None:
         self.id = data['id']
@@ -173,23 +183,23 @@ class Space:
 
     # clean
 
-    async def obtain(self, *resources: str) -> None:
-        """Obtain the given *resources*.
+    async def obtain(self, *items: str) -> None:
+        """Obtain the given *items*.
 
         Only available in debug mode.
         """
         bot = context.bot.get()
         if not bot.debug:
             raise ValueError('Disabled bot debug mode')
-        for resource in resources:
-            if resource not in self.RESOURCES:
-                raise ValueError(f'Unknown resources item {resource}')
+        for item in items:
+            if not any(item in items for items in Space.ITEM_CATEGORIES.values()):
+                raise ValueError(f'Unknown items item {item}')
 
         async with bot.redis.pipeline() as pipe:
             await pipe.watch(self.id)
             stock = (await pipe.hget(self.id, 'resources') or '').split()
             pipe.multi()
-            stock = sorted(chain(stock, resources), key=self._resource_order)
+            stock = sorted(chain(stock, items), key=Space.ITEM_WEIGHTS.__getitem__)
             pipe.hset(self.id, 'resources', ' '.join(stock))
             await pipe.execute()
 
@@ -203,7 +213,7 @@ class Space:
             gathered = []
             if growth == self.MEADOW_VEGETABLE_GROWTH_MAX:
                 gathered = ['🥕', '🪨']
-                resources = sorted(resources + gathered, key=self._resource_order)
+                resources = sorted(resources + gathered, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id,
                           mapping={'resources': ' '.join(resources), 'meadow_vegetable_growth': 0})
             await pipe.execute()
@@ -219,7 +229,7 @@ class Space:
             wood = []
             if space.woods_growth == self.WOODS_GROWTH_MAX:
                 wood = ['🪵']
-                resources = sorted(space.resources + wood, key=self._resource_order)
+                resources = sorted(space.resources + wood, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'woods_growth': 0})
             await pipe.execute()
             return wood
@@ -244,7 +254,7 @@ class Space:
             wool = []
             if space.pet_fur == self.PET_FUR_MAX:
                 wool = ['🧶']
-                resources = sorted(space.resources + wool, key=self._resource_order)
+                resources = sorted(space.resources + wool, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'pet_fur': 0})
             await pipe.execute()
             return wool
@@ -357,7 +367,7 @@ class Space:
             if hike.gathered:
                 if space.trail_supply < self.TRAIL_SUPPLY_FULL:
                     raise ValueError('Empty trail_supply')
-                resources = sorted(space.resources + hike.gathered, key=self._resource_order)
+                resources = sorted(space.resources + hike.gathered, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'trail_supply': 0})
             await pipe.execute()
 
@@ -371,12 +381,20 @@ class Space:
     # wash_pet() pet_hygiene dirty
 
 class Pet:
+    """Pet.
+
+    .. attribute:: clothing
+
+       Clothing the pet is wearing.
+    """
+
     MAX_DIRT = 48 + 1
 
     def __init__(self, data: dict[str, str]) -> None:
         self.id = data['id']
         self.space_id = data['space_id']
         self.dirt = int(data['dirt'])
+        self.clothing = data['clothing'] or None
 
     async def tick(self) -> None:
         async with context.bot.get().redis.pipeline() as pipe:
@@ -398,6 +416,31 @@ class Pet:
                 raise ValueError('No dirt')
             pipe.hset(self.id, 'dirt', 0)
             await pipe.execute()
+
+    async def dress(self, clothing: str | None) -> None:
+        """Dress the pet in the given *clothing*."""
+        if clothing and clothing not in Space.ITEM_CATEGORIES['clothing']:
+            raise ValueError(f'Unknown clothing {clothing}')
+
+        async with context.bot.get().redis.pipeline() as pipe:
+            await pipe.watch(self.id, self.space_id)
+            old_clothing = await pipe.hget(self.id, 'clothing') or None
+            items = (await pipe.hget(self.space_id, 'resources') or '').split()
+            pipe.multi()
+            if old_clothing:
+                items.append(old_clothing)
+                items.sort(key=Space.ITEM_WEIGHTS.__getitem__)
+            if clothing:
+                try:
+                    items.remove(clothing)
+                except ValueError:
+                    raise ValueError(f'No items item {clothing}') from None
+            pipe.hset(self.id, 'clothing', clothing or '')
+            pipe.hset(self.space_id, 'resources', ' '.join(items))
+            await pipe.execute()
+
+    def __str__(self) -> str:
+        return f"🐕{self.clothing or ''}"
 
 # clean
 
@@ -446,7 +489,7 @@ class Hike:
     _DIRECTIONS = {displacement: direction for direction, displacement in _DISPLACEMENTS.items()}
 
     def __init__(self, space: Space, *, resource: str | None = None) -> None:
-        if not (resource is None or resource in Space.RESOURCES):
+        if not (resource is None or resource in Space.ITEM_CATEGORIES['resource']):
             raise ValueError('Bad resource')
 
         self.space = space

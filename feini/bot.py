@@ -135,6 +135,7 @@ class Bot:
         # https://unicode.org/emoji/charts/text-style.html
         # https://unicode.org/emoji/charts/emoji-list.html
         alternatives = {
+            '🕶️': ['🕶', '🕶\N{VARIATION SELECTOR-15}'],
             '👋': ['👋\N{VARIATION SELECTOR-16}', '🤚', '🤚\N{VARIATION SELECTOR-16}', '🖐️', '🖐︎',
                    '✋', '✋\N{VARIATION SELECTOR-16}'],
             '✏️': ['✏', '🖊️', '🖊'],
@@ -399,7 +400,8 @@ class Bot:
             pet_data = {
                 'id': pet_id,
                 'space_id': space_id,
-                'dirt': str(Pet.MAX_DIRT - Space.INTERVAL_S)
+                'dirt': str(Pet.MAX_DIRT - Space.INTERVAL_S),
+                'clothing': ''
             }
             pipe.hset(space_id, mapping=data)
             pipe.hset(pet_id, mapping=pet_data)

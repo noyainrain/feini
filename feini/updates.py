@@ -24,6 +24,17 @@ from . import context
 from .space import Space
 from .util import randstr
 
+async def update_pet_clothing() -> None:
+    updates = 0
+    redis = context.bot.get().redis
+    for space_id in await redis.hvals('spaces_by_chat'):
+        pet_id = await redis.hget(space_id, 'pet_id') or ''
+        if not await redis.hexists(pet_id, 'clothing'):
+            await redis.hset(pet_id, 'clothing', '')
+            updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Pet.clothing (%d)', updates)
+
 async def update_space_trail_supply() -> None:
     updates = 0
     bot = context.bot.get()
