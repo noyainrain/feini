@@ -135,6 +135,8 @@ class Bot:
         # https://unicode.org/emoji/charts/text-style.html
         # https://unicode.org/emoji/charts/emoji-list.html
         alternatives = {
+            '🎧': ['🎧\N{VARIATION SELECTOR-15}', '🎧\N{VARIATION SELECTOR-16}'],
+            '👓': ['👓\N{VARIATION SELECTOR-15}', '👓\N{VARIATION SELECTOR-16}'],
             '🕶️': ['🕶', '🕶\N{VARIATION SELECTOR-15}'],
             '👋': ['👋\N{VARIATION SELECTOR-16}', '🤚', '🤚\N{VARIATION SELECTOR-16}', '🖐️', '🖐︎',
                    '✋', '✋\N{VARIATION SELECTOR-16}'],

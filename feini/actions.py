@@ -229,7 +229,7 @@ class MainMode(Mode):
                                   for typ, cost in list(space.COSTS.items())[:5])
                 furniture = '\n'.join(f"{typ}: {''.join(cost)}"
                                       for typ, cost in list(space.COSTS.items())[5:])
-                return f'🔨 ⬜Item\nCraft an item.\n\nTools:\n{tools}\nFurniture:\n{furniture}'
+                return f'🔨 ⬜Item\nCraft a new item.\n\nTools:\n{tools}\nFurniture:\n{furniture}'
                 #catalog = '\n'.join(
                 #    f"{typ}: {''.join(cost)}" for typ, cost in bot.costs.items())
                 #return f'🔨 ⬜Item\n\nCatalog:\n{catalog}'
@@ -238,6 +238,35 @@ class MainMode(Mode):
             raise
 
     # clean
+
+    @item_action('🪡')
+    async def sew(self, space: Space, *args: str) -> str:
+        try:
+            pattern = args[1]
+        except IndexError:
+            pattern = '_'
+
+        try:
+            material = ''.join(space.CLOTHING_MATERIAL[pattern])
+        except KeyError:
+            clothes = '\n                '.join(
+                f"{pattern}: {''.join(material)}"
+                for pattern, material in Space.CLOTHING_MATERIAL.items())
+            return dedent(f"""\
+                🪡 ⬜Item
+                Sew a new clothing item.
+
+                Clothes:
+                {clothes}
+            """)
+
+        try:
+            await space.sew(pattern)
+            return f'🪡 You spent {material} to sew a new {pattern}. 🥳'
+        except ValueError as e:
+            if 'resources' in str(e):
+                return f'You need {material} to sew a {pattern}.'
+            raise
 
     async def _dress_pet(self, space: Space, *args: str) -> str:
         clothing = args[0]
@@ -248,20 +277,22 @@ class MainMode(Mode):
             return pet_message(await space.get_pet(),
                                f"{space.pet_name} let's you take off the {clothing}.", mood='😊')
 
-        try:
-            await pet.dress(clothing)
-        except ValueError as e:
-            if 'clothing' in str(e):
-                return await self.default(space, clothing)
-            raise
+        await pet.dress(clothing)
         pet = await space.get_pet()
         return random.choice([
             pet_message(pet, f'{space.pet_name} looks very pretty.', mood='😊'),
             pet_message(pet, f'{space.pet_name} looks happy with its {clothing}.', mood='😊')
         ])
 
-    dress_pet = action('🕶️')(_dress_pet)
-    _dress_pet_ribbon = action('🎀')(_dress_pet)
+    dress_pet = item_action('🧢')(_dress_pet)
+    _dress_pet_sun_hat = item_action('👒')(_dress_pet)
+    _dress_pet_headphones = item_action('🎧')(_dress_pet)
+    _dress_pet_glasses = item_action('👓')(_dress_pet)
+    _dress_pet_sunglasses = item_action('🕶️')(_dress_pet)
+    _dress_pet_goggles = item_action('🥽')(_dress_pet)
+    _dress_pet_scarf = item_action('🧣')(_dress_pet)
+    _dress_pet_ribbon = item_action('🎀')(_dress_pet)
+    _dress_pet_ring = item_action('💍')(_dress_pet)
 
     @item_action('🧭')
     async def hike(self, space: Space, *args: str) -> str:

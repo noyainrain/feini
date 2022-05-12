@@ -136,21 +136,24 @@ class SpaceTest(FeiniTestCase):
 
     # test_chop_woods empty
 
+    # clean
+
     async def test_use_scissors(self) -> None:
-        await self.obtain(Space.COSTS['✂️'])
-        await self.space.craft('✂️')
+        await self.space.obtain('✂️')
+        for tick in range(Space.PET_FUR_MAX):
+            await self.space.tick(tick)
         wool = await self.space.use('✂️')
-        space = await self.bot.get_space(self.space.id)
+        space = await self.space.get()
         self.assertEqual(wool, ['🧶']) # type: ignore[misc]
-        self.assertEqual(space.resources, ['🥕', '🥕', '🥕', '🧶']) # type: ignore[misc]
+        self.assertEqual(space.resources, ['🧶']) # type: ignore[misc]
         self.assertEqual(space.pet_fur, 0)
 
     async def test_use_scissors_no_pet_fur(self) -> None:
-        await self.obtain(Space.COSTS['✂️'])
-        await self.space.craft('✂️')
-        await self.space.use('✂️')
+        await self.space.obtain('✂️')
         wool = await self.space.use('✂️')
         self.assertFalse(wool)
+
+    # /clean
 
     async def test_craft(self) -> None:
         await self.obtain(Space.COSTS['🪓'])
@@ -171,6 +174,22 @@ class SpaceTest(FeiniTestCase):
     async def test_craft_no_resources(self) -> None:
         with self.assertRaisesRegex(ValueError, 'resources'):
             await self.space.craft('🪴')
+
+    # clean
+
+    async def test_sew(self) -> None:
+        await self.space.obtain('🪡', *Space.CLOTHING_MATERIAL['🎀'])
+        ribbon = await self.space.sew('🎀')
+        space = await self.space.get()
+        self.assertEqual(ribbon, '🎀')
+        self.assertEqual(space.resources, ['🎀']) # type: ignore[misc]
+
+    async def test_sew_no_resources(self) -> None:
+        await self.space.obtain('🪡')
+        with self.assertRaisesRegex(ValueError, 'resources'):
+            await self.space.sew('🎀')
+
+    # /clean
 
 class PetTest(FeiniTestCase):
     async def asyncSetUp(self) -> None:

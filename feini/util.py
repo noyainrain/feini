@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from asyncio import CancelledError, Task
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import random
 import re
@@ -133,6 +133,9 @@ class Redis(aioredis.client.Redis):
 
     def hgetall(self, name: KeyT) -> Awaitable[dict[str, str]]:
         return cast(Awaitable[dict[str, str]], super().hgetall(name))
+
+    def hmget(self, name: KeyT, keys: Sequence[KeyT], *args: FieldT) -> Awaitable[list[str | None]]:
+        return cast('Awaitable[list[str | None]]', super().hmget(name, keys, *args))
 
     def hset(self, name: KeyT, key: FieldT | None = None, value: EncodableT | None = None,
              mapping: Mapping[AnyFieldT, EncodableT] | None = None) -> Awaitable[int]:

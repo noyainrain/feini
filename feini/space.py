@@ -61,7 +61,8 @@ class Space:
 
     ITEM_CATEGORIES = {
         'resource': ['🥕', '🪨', '🪵', '🧶'],
-        'clothing': ['🕶️', '🎀']
+        'clothing': ['🧢', '👒', '🎧', '👓', '🕶️', '🥽', '🧣', '🎀', '💍'],
+        'tool': ['👋', '✏️', '🧺', '🪓', '✂️', '🔨', '🪡', '🍳', '🧽', '🚿', '🧭']
     }
 
     ITEM_WEIGHTS = {
@@ -70,26 +71,44 @@ class Space:
             in enumerate(item for items in ITEM_CATEGORIES.values() for item in items)
     }
 
+    # Material distribution guidelines: 4 - 5 resources for small (S) objects, 6 - 7 for M and 8 - 9
+    # for L (for details see ``scripts/material.py``)
+
     COSTS = {
         # Tools
         '🪓': ['🪨'], # S
-        '✂️': ['🪨', '🪨', '🪨'], # S
+        '✂️': ['🪨', '🪨', '🪨', '🪵'], # S
         '🍳': ['🪨', '🪨', '🪨', '🪨', '🪵'], # S
         '🚿': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
         '🧭': ['🪨', '🪨', '🪨', '🪨'], # S
         # Toys
         '🪃': ['🪵', '🪵'], # S
-        '⚾': ['🪵', '🧶', '🧶', '🧶'], # S
-        '🧸': ['🧶', '🧶', '🧶', '🧶'], # S
+        '⚾': ['🪵', '🪵', '🧶', '🧶', '🧶'], # S
+        '🧸': ['🪨', '🧶', '🧶', '🧶', '🧶'], # S
         # Furniture
         '🛋️': ['🪨', '🪵', '🪵', '🪵', '🪵', '🧶', '🧶', '🧶', '🧶'], # L
-        '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵', '🧶'], # M
-        '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L
+        '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵', '🪵'], # M
+        '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L
         # Devices
         '📺': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
         # Miscellaneous
-        '🗞️': ['🪵', '🪵', '🧶', '🧶'], # S
-        '🎨': ['🪵', '🪵', '🪵', '🪨', '🧶', '🧶', '🧶'] # M
+        '🗞️': ['🪵', '🪵', '🪵',  '🧶'], # S
+        '🎨': ['🪵', '🪵', '🪵', '🪵', '🪨', '🧶', '🧶'] # M
+    }
+
+    CLOTHING_MATERIAL = {
+        # Head
+        '🧢': ['🪵', '🧶', '🧶', '🧶'], # S
+        '👒': ['🪵', '🪵', '🪵', '🪵', '🧶'], # S
+        '🎧': ['🪨', '🪨', '🧶', '🧶', '🧶'], # S
+        # Face
+        '👓': ['🪨', '🪨', '🪵', '🪵', '🧶'], # S
+        '🕶️': ['🪨', '🪨', '🪵', '🪵', '🧶'], # S
+        '🥽': ['🪨', '🪨', '🧶', '🧶', '🧶'], # S
+        # Body
+        '🧣': ['🧶', '🧶', '🧶', '🧶', '🧶', '🧶'], # M
+        '🎀': ['🧶', '🧶', '🧶', '🧶'], # S
+        '💍': ['🪨', '🪨', '🪨', '🪨', '🧶'] # S
     }
 
     INTERVAL_S = 7
@@ -195,12 +214,18 @@ class Space:
             if not any(item in items for items in Space.ITEM_CATEGORIES.values()):
                 raise ValueError(f'Unknown items item {item}')
 
+        tools = tuple(item for item in items if item in self.ITEM_CATEGORIES['tool'])
+        items = tuple(item for item in items if item not in self.ITEM_CATEGORIES['tool'])
         async with bot.redis.pipeline() as pipe:
             await pipe.watch(self.id)
-            stock = (await pipe.hget(self.id, 'resources') or '').split()
+            values = await pipe.hmget(self.id, 'resources', 'tools', 'oink')
+            stock = (values[0] or '').split()
+            tools_stock = (values[1] or '').split()
             pipe.multi()
             stock = sorted(chain(stock, items), key=Space.ITEM_WEIGHTS.__getitem__)
-            pipe.hset(self.id, 'resources', ' '.join(stock))
+            tools_stock += tools
+            pipe.hset(self.id,
+                      mapping={'resources': ' '.join(stock), 'tools': ' '.join(tools_stock)})
             await pipe.execute()
 
     # /clean
@@ -311,6 +336,36 @@ class Space:
         # Transaction note: paid and placeholder in list, so potentially we could call create later
         # to retry
         return await cls.create(id, typ)
+
+    # clean
+
+    async def sew(self, pattern: str) -> str:
+        """Sew a new clothing item given by *pattern*."""
+        try:
+            material = self.CLOTHING_MATERIAL[pattern]
+        except KeyError:
+            raise ValueError(f'Unknown pattern {pattern}') from None
+
+        async with context.bot.get().redis.pipeline() as pipe:
+            await pipe.watch(self.id)
+            values = await pipe.hmget(self.id, 'resources', 'tools')
+            items = (values[0] or '').split()
+            tools = (values[1] or '').split()
+            pipe.multi()
+            if '🪡' not in tools:
+                raise ValueError('No tools item 🪡')
+            try:
+                for item in material:
+                    items.remove(item)
+            except ValueError:
+                raise ValueError('Missing resources') from None
+            items.append(pattern)
+            items.sort(key=Space.ITEM_WEIGHTS.__getitem__)
+            pipe.hset(self.id, 'resources', ' '.join(items))
+            await pipe.execute()
+        return pattern
+
+    # /clean
 
     async def touch_pet(self) -> None:
         await context.bot.get().redis.hset(self.id, 'pet_is_egg', '')
