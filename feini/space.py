@@ -12,13 +12,20 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.
 # If not, see <https://www.gnu.org/licenses/>.
 
-"""TODO."""
+"""TODO.
+
+.. data:: CHARACTER_NAMES
+
+   Name of each character.
+"""
 
 from __future__ import annotations
 
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Collection, Iterable
 from contextlib import asynccontextmanager
+import dataclasses
+from dataclasses import dataclass, field
 from itertools import chain
 import random
 from random import randint, shuffle
@@ -30,6 +37,10 @@ from aioredis.exceptions import WatchError
 from . import context
 from .items import Object
 from .util import Pipeline, Redis, isemoji, randstr
+
+CHARACTER_NAMES = {
+    '👻': 'Ghost'
+}
 
 class Space:
     """TODO.
@@ -162,6 +173,18 @@ class Space:
                 pipe.hgetall(item_id)
             items = cast(list[dict[str, str]], await pipe.execute())
             return [bot.object_types[data['type']](data) for data in items]
+
+    # clean
+
+    async def get_characters(self) -> list[Character]:
+        """Get the present characters."""
+        redis = context.bot.get().redis
+        ids = await redis.lrange(f'{self.id}.characters', 0, -1)
+        characters = (await redis.hgetall(character_id) for character_id in ids)
+        return [Character(data) # type: ignore[misc]
+                async for data in characters if data] # type: ignore[attr-defined,misc]
+
+    # /clean
 
     async def get_pet_activity(self) -> Object | str:
         if self.pet_activity_id in {'', '💤', '🍃'}:
@@ -504,6 +527,103 @@ class Pet:
         return f"🐕{self.clothing or ''}"
 
 # clean
+
+@dataclass
+class Message:
+    """Dialogue message.
+
+    .. attribute:: id
+
+       Message ID.
+
+    .. attribute:: request
+
+       Items the character currently wants, if any.
+
+    .. attribute:: taken
+
+       Items the player has just given to the character, if any.
+    """
+
+    id: str
+    request: list[str] = field(default_factory=list)
+    taken: list[str] = field(default_factory=list, compare=False)
+
+    def __post_init__(self) -> None:
+        for item in self.request:
+            if not any(item in items
+                       for category, items in Space.ITEM_CATEGORIES.items() if category != 'tools'):
+                raise ValueError(f'Unknown request item {item}')
+        for item in self.taken:
+            if not any(item in items
+                       for category, items in Space.ITEM_CATEGORIES.items() if category != 'tools'):
+                raise ValueError(f'Unknown taken item {item}')
+
+    @staticmethod
+    def parse(data: str) -> Message:
+        """Parse the string representation *data* into a message."""
+        tokens = data.split()
+        return Message(tokens[0], tokens[1:])
+
+    def encode(self) -> str:
+        """Return a string representation of the message."""
+        return ' '.join([self.id, *self.request])
+
+class Character:
+    """Non-Player character.
+
+    .. attribute:: id
+
+       Character ID.
+
+    .. attribute:: space_id
+
+       Related :class:`Space` ID.
+
+    .. attribute:: avatar
+
+       Avatar emoji.
+    """
+
+    def __init__(self, data: dict[str, str]) -> None:
+        self.id = data['id']
+        self.space_id = data['space_id']
+        self.avatar = data['avatar']
+
+    async def get_dialogue(self) -> list[Message]:
+        """Get the ongoing dialogue, starting from the most recent message."""
+        return [Message.parse(message)
+                for message in await context.bot.get().redis.lrange(f'{self.id}.dialogue', 0, -1)]
+
+    async def talk(self) -> Message:
+        """Talk to the character and return their reply.
+
+        If the character has requested some items, give the items to them or repeat the request
+        message. The final dialogue message is always repeated.
+        """
+        async with context.bot.get().redis.pipeline() as pipe:
+            dialogue_key = f'{self.id}.dialogue'
+            await pipe.watch(dialogue_key, self.space_id)
+            messages = [Message.parse(message)
+                        for message in await pipe.lrange(dialogue_key, 0, 1)]
+            message = messages[0]
+            next_message = messages[1] if len(messages) > 1 else None
+            items = (await pipe.hget(self.space_id, 'resources') or '').split()
+
+            pipe.multi()
+            if next_message is None:
+                return message
+            if message.request:
+                try:
+                    for item in message.request:
+                        items.remove(item)
+                    next_message = dataclasses.replace(next_message, taken=message.request)
+                except ValueError:
+                    return message
+            pipe.ltrim(dialogue_key, 1, -1)
+            pipe.hset(self.space_id, 'resources', ' '.join(items))
+            await pipe.execute()
+            return next_message
 
 class Hike:
     """Hike minigame.

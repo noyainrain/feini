@@ -30,7 +30,7 @@ import unicodedata
 
 from . import context
 from .items import Newspaper, Object, Palette, Plant, Television
-from .space import Hike, Pet, Space
+from .space import Hike, Pet, Space, CHARACTER_NAMES
 from .util import isemoji
 
 _M = TypeVar('_M', bound='Mode', contravariant=True)
@@ -158,20 +158,20 @@ class MainMode(Mode):
 
     # pylint: disable=no-self-use,unused-argument
 
-    # /clean
+    _DIALOGUE = {}
 
     @action('⛺')
-    async def view_tent(self, space: Space, *args: str) -> str:
-        objects = [cast(str, getattr(item, 'state', item.type))
-                   for item in await space.get_objects()]
-        #items += ['⬜'] * (4 - len(items))
-        #items = ['│'] + items + ['.'] + ['\u2003'] * (4 - len(items)) + ['│']
-        items = ''.join(objects)
-        resources = ''.join(space.resources or '-')
-        tools = ''.join(space.tools)
-        return f'⛺{items}\n\nResources:\n{resources}\nTools:\n{tools}'
+    async def view_home(self, space: Space, *args: str) -> str:
+        furniture = ''.join(str(item) for item in await space.get_objects())
+        characters = ''.join(character.avatar for character in await space.get_characters())
+        return dedent(f"""\
+            ⛺{furniture} {characters}
 
-    # clean
+            Items:
+            {''.join(space.resources) or '-'}
+            Tools:
+            {''.join(space.tools)}
+        """)
 
     async def _view_resource(self, space: Space, *args: str) -> str:
         return random.choice([f'{args[0]} Good quality!', f'{args[0]} Beautiful!'])
@@ -369,6 +369,23 @@ class MainMode(Mode):
     async def view_palette(self, space: Space, entity: Object, *args: str) -> str:
         assert isinstance(entity, Palette)
         return random.choice([f'{entity.state} Good quality!', f'{entity.state} Beautiful!'])
+
+    @action('👻')
+    async def talk_to_character(self, space: Space, *args: str) -> str:
+        avatar = args[0]
+        character = next(
+            (character for character in await space.get_characters() if character.avatar == avatar),
+            None)
+        if not character:
+            return f'{CHARACTER_NAMES[avatar]} {avatar} is not here at the moment.'
+
+        message = await character.talk()
+        text = random.choice(self._DIALOGUE[message.id])
+        if message.taken:
+            text = text.replace('{items}', ''.join(message.taken))
+        elif message.request:
+            text = text.replace('{items}', ''.join(message.request))
+        return f'{avatar} {text}'
 
     # /clean
 

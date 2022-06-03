@@ -26,6 +26,9 @@ class Object:
     async def use(self) -> None:
         pass
 
+    def __str__(self) -> str:
+        return self.type
+
 class Plant(Object):
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
@@ -40,6 +43,9 @@ class Plant(Object):
     async def tick(self, time: int) -> None:
         if time % 24 == 0:
             await context.bot.get().redis.hset(self.id, 'state', random.choice(['🪴', '🌺']))
+
+    def __str__(self) -> str:
+        return self.state
 
 # https://developers.themoviedb.org/3/getting-started/popularity
 class Television(Object):
@@ -105,3 +111,6 @@ class Palette(Object):
     async def tick(self, time: int) -> None:
         if time % 24 == 0:
             await context.bot.get().redis.hset(self.id, 'state', random.choice(['🎨', '🖼️']))
+
+    def __str__(self) -> str:
+        return self.state
