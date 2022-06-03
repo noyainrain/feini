@@ -25,4 +25,9 @@ class BotTest(FeiniTestCase):
         mode_out = self.bot.get_mode(self.space.chat)
         self.assertIs(mode_out, mode_in)
 
+    async def test_create_space(self) -> None:
+        space = await self.bot.create_space('local')
+        blueprints = await space.get_blueprints()
+        self.assertTrue(blueprints)
+
 # /clean

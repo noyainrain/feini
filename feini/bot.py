@@ -405,10 +405,16 @@ class Bot:
                 'dirt': str(Pet.MAX_DIRT - Space.INTERVAL_S),
                 'clothing': ''
             }
+
             pipe.hset(space_id, mapping=data)
+            blueprints = [
+                '🪓', '✂️', '🍳', '🚿', '🧭', '🪃', '⚾', '🧸', '🛋️', '🪴', '⛲', '📺', '🗞️', '🎨']
+            pipe.zadd(f'{space_id}.blueprints',
+                      {blueprint: Space.BLUEPRINT_WEIGHTS[blueprint] for blueprint in blueprints})
             pipe.hset(pet_id, mapping=pet_data)
             pipe.hset('spaces_by_chat', chat, data['id'])
             await pipe.execute()
+
             return Space(data)
 
     def _parse(self, command: str) -> list[str]:

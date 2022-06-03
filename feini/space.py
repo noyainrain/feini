@@ -54,6 +54,10 @@ class Space:
 
        TODO.
 
+    .. data:: BLUEPRINT_WEIGHTS
+
+       Weights by which blueprints are ordered.
+
     .. data:: TRAIL_SUPPLY_FULL
 
        Level at which a resource is in supply on the trail.
@@ -78,6 +82,7 @@ class Space:
         # Tools
         '🪓': ['🪨'], # S
         '✂️': ['🪨', '🪨', '🪨', '🪵'], # S
+        '🪡': ['🪵', '🪵', '🪵', '🪵', '🪵'], # S
         '🍳': ['🪨', '🪨', '🪨', '🪨', '🪵'], # S
         '🚿': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
         '🧭': ['🪨', '🪨', '🪨', '🪨'], # S
@@ -111,6 +116,8 @@ class Space:
         '💍': ['🪨', '🪨', '🪨', '🪨', '🧶'] # S
     }
 
+    BLUEPRINT_WEIGHTS = {blueprint: weight for weight, blueprint in enumerate(COSTS)}
+
     INTERVAL_S = 7
     MEADOW_VEGETABLE_GROWTH_MAX = 7
     WOODS_GROWTH_MAX = 7
@@ -140,6 +147,10 @@ class Space:
 
     async def get(self) -> Space:
         return await context.bot.get().get_space(self.id)
+
+    async def get_blueprints(self) -> list[str]:
+        """Get known blueprints."""
+        return await context.bot.get().redis.zrange(f'{self.id}.blueprints', 0, -1)
 
     async def get_objects(self) -> list[Object]:
         bot = context.bot.get()
@@ -284,60 +295,55 @@ class Space:
             await pipe.execute()
             return wool
 
-    async def craft(self, typ: str) -> Object | str:
-        bot = context.bot.get()
-        try:
-            cost = self.COSTS[typ]
-        except KeyError as e:
-            raise ValueError(f'Unknown typ {typ}') from e
-        if typ in bot.object_types:
-            return await self._craft_home_item(typ, cost)
-        return await self._craft_tool(typ, cost)
-
-    async def _craft_tool(self, typ: str, cost: list[str]) -> str:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split(' ')
-            tools = (await pipe.hget(self.id, 'tools') or '').split(' ')
-            pipe.multi()
-            if typ in tools:
-                raise ValueError('already in tools')
-            try:
-                for resource in cost:
-                    resources.remove(resource)
-            except ValueError as e:
-                raise ValueError('not enough resources') from e
-            tools.append(typ)
-            pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'tools': ' '.join(tools)})
-            await pipe.execute()
-            return typ
-
-    async def _craft_home_item(self, typ: str, cost: list[str]) -> Object:
-        bot = context.bot.get()
-        cls = bot.object_types[typ]
-        id = f'Object:{randstr()}'
-
-        items_key = f'{self.id}.items'
-        async with transaction(bot.redis, self.id, items_key) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split(' ')
-            item_count = await pipe.llen(items_key)
-            pipe.multi()
-            # TODO replace? random? require trash?
-            #if item_count >= 4:
-            #    raise ValueError('max items')
-            try:
-                for resource in cost:
-                    resources.remove(resource)
-            except ValueError as e:
-                raise ValueError('not enough resources') from e
-            pipe.hset(self.id, 'resources', ' '.join(resources))
-            pipe.rpush(items_key, id)
-            await pipe.execute()
-
-        # Transaction note: paid and placeholder in list, so potentially we could call create later
-        # to retry
-        return await cls.create(id, typ)
-
     # clean
+
+    async def craft(self, blueprint: str) -> str | Object:
+        """Craft a new object given by *blueprint*."""
+        if blueprint in context.bot.get().object_types:
+            return await self._craft_furniture_item(blueprint)
+        return await self._craft_tool(blueprint)
+
+    async def _craft_tool(self, blueprint: str) -> str:
+        async with context.bot.get().redis.pipeline() as pipe:
+            await pipe.watch(self.id)
+            values = await pipe.hmget(self.id, 'resources', 'tools')
+            items = (values[0] or '').split(' ')
+            tools = (values[1] or '').split(' ')
+            if await pipe.zscore(f'{self.id}.blueprints', blueprint) is None:
+                raise ValueError(f'Unknown blueprint {blueprint}')
+            pipe.multi()
+            try:
+                for resource in self.COSTS[blueprint]:
+                    items.remove(resource)
+            except ValueError:
+                raise ValueError('Missing resources') from None
+            tools.append(blueprint)
+            pipe.hset(self.id, mapping={'resources': ' '.join(items), 'tools': ' '.join(tools)})
+            await pipe.execute()
+        return blueprint
+
+    async def _craft_furniture_item(self, blueprint: str) -> Object:
+        bot = context.bot.get()
+        object_id = f'Object:{randstr()}'
+
+        async with bot.redis.pipeline() as pipe:
+            await pipe.watch(self.id)
+            items = (await pipe.hget(self.id, 'resources') or '').split(' ')
+            if await pipe.zscore(f'{self.id}.blueprints', blueprint) is None:
+                raise ValueError(f'Unknown blueprint {blueprint}')
+            pipe.multi()
+            try:
+                for resource in self.COSTS[blueprint]:
+                    items.remove(resource)
+            except ValueError:
+                raise ValueError('Missing resources') from None
+            pipe.hset(self.id, 'resources', ' '.join(items))
+            pipe.rpush(f'{self.id}.items', object_id)
+            await pipe.execute()
+
+        # Note that if there is a crash creating the furniture item, we could create it later from
+        # the reserved ID
+        return await bot.object_types[blueprint].create(object_id, blueprint)
 
     async def sew(self, pattern: str) -> str:
         """Sew a new clothing item given by *pattern*."""

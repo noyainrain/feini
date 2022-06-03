@@ -24,6 +24,23 @@ from . import context
 from .space import Space
 from .util import randstr
 
+async def update_space_blueprints() -> None:
+    updates = 0
+    redis = context.bot.get().redis
+    blueprints = {
+        blueprint:
+            Space.BLUEPRINT_WEIGHTS[blueprint]
+            for blueprint
+            in ['🪓', '✂️', '🍳', '🚿', '🧭', '🪃', '⚾', '🧸', '🛋️', '🪴', '⛲', '📺', '🗞️', '🎨']
+    }
+    for space_id in await redis.hvals('spaces_by_chat'):
+        key = f'{space_id}.blueprints'
+        if not await redis.exists(key):
+            await redis.zadd(key, blueprints)
+            updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Space.blueprints (%d)', updates)
+
 async def update_pet_clothing() -> None:
     updates = 0
     redis = context.bot.get().redis

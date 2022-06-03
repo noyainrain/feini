@@ -213,31 +213,49 @@ class MainMode(Mode):
             return f"🪓 You chopped {''.join(wood)} in the woods. 😊"
         return '🪓 There are no more logs in the woods. Maybe try again later?'
 
+    # clean
+
     @item_action('🔨')
     async def craft(self, space: Space, *args: str) -> str:
         try:
-            typ = args[1]
+            blueprint = args[1]
         except IndexError:
-            typ = '_'
+            blueprint = '_'
 
         try:
-            await space.craft(typ)
-            return f'🔨 You crafted a new {typ}. 🥳'
-        except ValueError as e:
-            if 'typ' in str(e):
-                tools = '\n'.join(f"{typ}: {''.join(cost)}"
-                                  for typ, cost in list(space.COSTS.items())[:5])
-                furniture = '\n'.join(f"{typ}: {''.join(cost)}"
-                                      for typ, cost in list(space.COSTS.items())[5:])
-                return f'🔨 ⬜Item\nCraft a new item.\n\nTools:\n{tools}\nFurniture:\n{furniture}'
-                #catalog = '\n'.join(
-                #    f"{typ}: {''.join(cost)}" for typ, cost in bot.costs.items())
-                #return f'🔨 ⬜Item\n\nCatalog:\n{catalog}'
-            if 'resources' in str(e):
-                return f"🔨 You need {''.join(space.COSTS[typ])} to craft a {typ}."
-            raise
+            await space.craft(blueprint)
+            return f"🔨 You spent {''.join(Space.COSTS[blueprint])} to craft a new {blueprint}. 🥳"
 
-    # clean
+        except ValueError as e:
+            if 'blueprint' in str(e):
+                blueprints = await space.get_blueprints()
+                catalog = {
+                    'Tools': [
+                        blueprint for blueprint in blueprints
+                        if blueprint in space.ITEM_CATEGORIES['tool']],
+                    'Furniture': [
+                        blueprint for blueprint in blueprints
+                        if blueprint in context.bot.get().object_types]
+                }
+                line_break = '\n                    '
+                catalog_material = {
+                    category:
+                        line_break.join(f"{blueprint}: {''.join(space.COSTS[blueprint])}"
+                                        for blueprint in blueprints)
+                        for category, blueprints in catalog.items()
+                }
+                catalog_text = line_break.join(f'{category}:{line_break}{blueprints}'
+                                               for category, blueprints in catalog_material.items())
+                return dedent(f"""\
+                    🔨 ⬜Item
+                    Craft a new item.
+
+                    {catalog_text}
+                """)
+
+            if 'resources' in str(e):
+                return f"You need {''.join(Space.COSTS[blueprint])} to craft a {blueprint}."
+            raise
 
     @item_action('🪡')
     async def sew(self, space: Space, *args: str) -> str:

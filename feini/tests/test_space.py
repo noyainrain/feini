@@ -153,17 +153,15 @@ class SpaceTest(FeiniTestCase):
         wool = await self.space.use('✂️')
         self.assertFalse(wool)
 
-    # /clean
-
     async def test_craft(self) -> None:
-        await self.obtain(Space.COSTS['🪓'])
+        await self.space.obtain(*Space.COSTS['🪓'])
         axe = await self.space.craft('🪓')
-        space = await bot.get().get_space(self.space.id)
+        space = await self.space.get()
         self.assertEqual(axe, '🪓')
-        self.assertEqual(space.tools, self.space.tools + ['🪓']) # type: ignore[misc]
-        self.assertEqual(space.resources, ['🥕']) # type: ignore[misc]
+        self.assertEqual(space.tools, [*self.space.tools, '🪓']) # type: ignore[misc]
+        self.assertFalse(space.resources)
 
-    async def test_craft_home_item(self) -> None:
+    async def test_craft_furniture_item(self) -> None:
         await self.space.obtain(*Space.COSTS['🪴'])
         plant = await self.space.craft('🪴')
         space = await self.space.get()
@@ -171,11 +169,13 @@ class SpaceTest(FeiniTestCase):
         self.assertEqual(await space.get_objects(), [plant]) # type: ignore[misc]
         self.assertFalse(space.resources)
 
+    async def test_craft_unknown_blueprint(self) -> None:
+        with self.assertRaisesRegex(ValueError, 'blueprint'):
+            await self.space.craft('🪡')
+
     async def test_craft_no_resources(self) -> None:
         with self.assertRaisesRegex(ValueError, 'resources'):
             await self.space.craft('🪴')
-
-    # clean
 
     async def test_sew(self) -> None:
         await self.space.obtain('🪡', *Space.CLOTHING_MATERIAL['🎀'])

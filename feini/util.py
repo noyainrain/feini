@@ -17,18 +17,18 @@
 from __future__ import annotations
 
 from asyncio import CancelledError, Task
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import random
 import re
 import string
 import sys
-from typing import Awaitable, Type, TypeVar, cast, overload
+from typing import Awaitable, Literal, Type, TypeVar, cast, overload
 import unicodedata
 
 from aiohttp import ClientResponse, ClientResponseError
 import aioredis.client
-from aioredis.client import AnyFieldT, ExpiryT, FieldT, KeyT, KeysT, TimeoutSecT
+from aioredis.client import AnyFieldT, AnyKeyT, ExpiryT, FieldT, KeyT, KeysT, TimeoutSecT
 from aioredis.connection import EncodableT
 
 _T = TypeVar('_T')
@@ -122,6 +122,9 @@ class Redis(aioredis.client.Redis):
     def blpop(self, keys: KeysT, timeout: TimeoutSecT = 0) -> Awaitable[tuple[str, str]]:
         return cast(Awaitable[tuple[str, str]], super().blpop(keys, timeout))
 
+    def exists(self, *names: KeyT) -> Awaitable[int]:
+        return cast(Awaitable[int], super().exists(*names))
+
     def get(self, name: KeyT) -> Awaitable[str | None]:
         return cast('Awaitable[str | None]', super().get(name))
 
@@ -155,6 +158,50 @@ class Redis(aioredis.client.Redis):
         nx: bool = False, xx: bool = False, keepttl: bool = False
     ) -> Awaitable[None]:
         return cast(Awaitable[None], super().set(name, value, ex, px, nx, xx, keepttl))
+
+    # clean
+
+    def zadd(
+        self, name: KeyT, mapping: Mapping[AnyKeyT, EncodableT], nx: bool = False, xx: bool = False,
+        ch: bool = False, incr: bool = False
+    ) -> Awaitable[int | float | None]:
+        return cast('Awaitable[int | float | None]', super().zadd(name, mapping, nx, xx, ch, incr))
+
+    @overload # type: ignore[override]
+    def zrange(self, name: KeyT, start: int, end: int, desc: bool,
+               withscores: Literal[True]) -> Awaitable[list[tuple[str, float]]]:
+        pass
+    @overload
+    def zrange(self, name: KeyT, start: int, end: int, desc: bool, withscores: Literal[True],
+               score_cast_func: Callable[[str], _T]) -> Awaitable[list[tuple[str, _T]]]:
+        pass
+    @overload
+    def zrange(self, name: KeyT, start: int, end: int, desc: bool = False, *,
+               withscores: Literal[True]) -> Awaitable[list[tuple[str, float]]]:
+        pass
+    @overload
+    def zrange(
+        self, name: KeyT, start: int, end: int, desc: bool = False, *, withscores: Literal[True],
+        score_cast_func: Callable[[str], _T]) -> Awaitable[list[tuple[str, _T]]]:
+        pass
+    @overload
+    def zrange(
+        self, name: KeyT, start: int, end: int, desc: bool = False,
+        withscores: Literal[False] = False,
+        score_cast_func: Callable[[str], _T] = float # type: ignore[assignment]
+    ) -> Awaitable[list[str]]:
+        pass
+    def zrange(
+        self, name: KeyT, start: int, end: int, desc: bool = False, withscores: bool = False,
+        score_cast_func: Callable[[str], _T] = float # type: ignore[assignment]
+    ) -> Awaitable[list[str] | list[tuple[str, _T]]]:
+        return cast('Awaitable[list[str] | list[tuple[str, _T]]]',
+                    super().zrange(name, start, end, desc, withscores, score_cast_func))
+
+    # /clean
+
+    def zscore(self, name: str, value: EncodableT) -> Awaitable[float | None]:
+        return cast('Awaitable[float | None]', super().set(name, value))
 
 class Pipeline(aioredis.client.Pipeline, Redis):
     def multi(self) -> None:
