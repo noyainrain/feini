@@ -22,7 +22,7 @@ async def main() -> None:
     logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s: %(message)s',
                         level=logging.INFO)
     config = ConfigParser()
-    config.read('feini.ini')
+    config.read('fe.ini')
     redis_url = config.get('feini', 'redis_url', fallback='redis:')
     try:
         debug = config.getboolean('feini', 'debug', fallback=False)
