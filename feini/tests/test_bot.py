@@ -16,7 +16,7 @@
 
 from feini.actions import HikeMode
 from feini.space import Hike
-from feini.tests.test_space import FeiniTestCase
+from .test_space import FeiniTestCase
 
 class BotTest(FeiniTestCase):
     async def test_get_set_mode(self) -> None:
