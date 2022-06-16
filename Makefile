@@ -9,22 +9,17 @@ NPMFLAGS=-C client --no-save --no-optional
 test:
 	$(PYTHON) -m unittest
 
-.PHONY: test-ext
-test-ext:
-	$(PYTHON) -m unittest discover -p "ext_test*.py"
-
-.PHONY: test-ui
-test-ui:
-	$(NPM) $(NPMFLAGS) run test-ui
-
 .PHONY: watch-test
 watch-test:
 	trap "exit 0" INT; $(PYTHON) -m tornado.autoreload -m unittest
 
 .PHONY: lint
 lint:
-	pylint -j 0 {package}
-	$(NPM) $(NPMFLAGS) run lint
+	pylint -j 0 feini
+
+.PHONY: type
+type:
+	mypy feini
 
 .PHONY: check
 check: test test-ext test-ui lint
@@ -32,14 +27,10 @@ check: test test-ext test-ui lint
 .PHONY: deps
 deps:
 	$(PIP) install $(PIPFLAGS) -r requirements.txt
-	@# Work around npm 7 update modifying package.json (see https://github.com/npm/cli/issues/3044)
-	@#$(NPM) $(NPMFLAGS) install --only=prod
 
 .PHONY: deps-dev
 deps-dev:
 	$(PIP) install $(PIPFLAGS) -r requirements-dev.txt
-	@# Work around npm 7 update modifying package.json (see https://github.com/npm/cli/issues/3044)
-	@#$(NPM) $(NPMFLAGS) install
 
 .PHONY: doc
 doc:
