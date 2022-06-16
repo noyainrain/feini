@@ -29,7 +29,7 @@ from typing import ClassVar, Generic, Protocol, TypeVar, cast, overload
 import unicodedata
 
 from . import context
-from .items import Newspaper, Object, Palette, Plant, Television
+from .furniture import Furniture, Houseplant, Newspaper, Palette, Television
 from .space import Hike, Pet, Space, CHARACTER_NAMES
 from .util import isemoji
 
@@ -109,7 +109,7 @@ class Mode:
         raise NotImplementedError()
 
 class _EntityActionCallable(Protocol):
-    async def __call__(_, self: MainMode, space: Space, entity: Object, *args: str) -> str:
+    async def __call__(_, self: MainMode, space: Space, entity: Furniture, *args: str) -> str:
         # pylint: disable=no-self-argument
         pass
 
@@ -350,40 +350,40 @@ class MainMode(Mode):
     _try_hike_destination = action('📍')(_try_hike)
 
     @entity_action('🪃')
-    async def view_boomerang(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_boomerang(self, space: Space, entity: Furniture, *args: str) -> str:
         return random.choice(['🪃 Good quality!', '🪃 Beautiful!'])
 
     @entity_action('⚾')
-    async def view_ball(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_ball(self, space: Space, entity: Furniture, *args: str) -> str:
         return random.choice(['⚾ Good quality!', '⚾ Beautiful!'])
 
     @entity_action('🧸')
-    async def view_teddy(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_teddy(self, space: Space, entity: Furniture, *args: str) -> str:
         return random.choice(['🧸 Good quality!', '🧸 Beautiful!'])
 
     @entity_action('🛋️')
-    async def view_couch(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_couch(self, space: Space, entity: Furniture, *args: str) -> str:
         return random.choice(['🛋️ Good quality!', '🛋️ Beautiful!'])
 
     @entity_action('🪴')
-    async def view_plant(self, space: Space, entity: Object, *args: str) -> str:
-        assert isinstance(entity, Plant)
+    async def view_plant(self, space: Space, entity: Furniture, *args: str) -> str:
+        assert isinstance(entity, HousePlant)
         return random.choice([f'{entity.state} Good quality!', f'{entity.state} Beautiful!'])
 
     @entity_action('⛲')
-    async def view_fountain(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_fountain(self, space: Space, entity: Furniture, *args: str) -> str:
         return random.choice(['⛲ Good quality!', '⛲ Beautiful!'])
 
     @entity_action('📺')
-    async def view_television(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_television(self, space: Space, entity: Furniture, *args: str) -> str:
         return random.choice(['📺 Good quality!', '📺 Beautiful!'])
 
     @entity_action('🗞️')
-    async def view_newspaper(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_newspaper(self, space: Space, entity: Furniture, *args: str) -> str:
         return random.choice(['🗞️ Good quality!', '🗞️ Beautiful!'])
 
     @entity_action('🎨')
-    async def view_palette(self, space: Space, entity: Object, *args: str) -> str:
+    async def view_palette(self, space: Space, entity: Furniture, *args: str) -> str:
         assert isinstance(entity, Palette)
         return random.choice([f'{entity.state} Good quality!', f'{entity.state} Beautiful!'])
 
@@ -420,7 +420,7 @@ class MainMode(Mode):
         activity = await space.get_pet_activity()
         if activity == '':
             return pet_message(pet, random.choice([f'{space.pet_name} wags its tail.', say(1)]))
-        symbol = activity.type if isinstance(activity, Object) else activity
+        symbol = activity.type if isinstance(activity, Furniture) else activity
         f = context.bot.get().activities[symbol]
         return await f(space, activity)
 
@@ -570,21 +570,21 @@ def say(n: int = 0) -> str:
     return s
     # return f'”{s}”' if s else ''
 
-async def view_sleep(space: Space, activity: Object | str) -> str:
+async def view_sleep(space: Space, activity: Furniture | str) -> str:
     assert isinstance(activity, str)
     pet = await space.get_pet()
     text = random.choice(
         [f'{space.pet_name} is taking a nap.', f'{space.pet_name} is snoring to itself.'])
     return pet_message(pet, text, focus=activity)
 
-async def view_leaves(space: Space, activity: Object | str) -> str:
+async def view_leaves(space: Space, activity: Furniture | str) -> str:
     assert isinstance(activity, str)
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} is chasing after some leaves. {say()}',
                        focus=activity)
 
-async def view_boomerang(space: Space, activity: Object | str) -> str:
-    assert isinstance(activity, Object)
+async def view_boomerang(space: Space, activity: Furniture | str) -> str:
+    assert isinstance(activity, Furniture)
     pet = await space.get_pet()
     text = random.choice([
         f'{space.pet_name} is fetching the boomerang. {say()}',
@@ -592,24 +592,24 @@ async def view_boomerang(space: Space, activity: Object | str) -> str:
     ])
     return pet_message(pet, text, focus=activity.type)
 
-async def view_ball(space: Space, activity: Object | str) -> str:
-    assert isinstance(activity, Object)
+async def view_ball(space: Space, activity: Furniture | str) -> str:
+    assert isinstance(activity, Furniture)
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} is playing with the ball. {say()}',
                        focus=activity.type)
 
-async def view_teddy(space: Space, activity: Object | str) -> str:
-    assert isinstance(activity, Object)
+async def view_teddy(space: Space, activity: Furniture | str) -> str:
+    assert isinstance(activity, Furniture)
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} is cuddling with its teddy.', focus=activity.type)
 
-async def view_couch(space: Space, activity: Object | str) -> str:
-    assert isinstance(activity, Object)
+async def view_couch(space: Space, activity: Furniture | str) -> str:
+    assert isinstance(activity, Furniture)
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} is relaxing on the couch.', focus=activity.type)
 
-async def view_plant(space: Space, activity: Object | str) -> str:
-    assert isinstance(activity, Plant)
+async def view_plant(space: Space, activity: Furniture | str) -> str:
+    assert isinstance(activity, HousePlant)
     pet = await space.get_pet()
     if activity.state == '🌺':
         text = f'{space.pet_name} is smelling the fresh blossoms.'
@@ -617,26 +617,26 @@ async def view_plant(space: Space, activity: Object | str) -> str:
         text = f'{space.pet_name} is carefully watering the plant.'
     return pet_message(pet, text, focus=activity.state)
 
-async def view_fountain(space: Space, activity: Object | str) -> str:
-    assert isinstance(activity, Object)
+async def view_fountain(space: Space, activity: Furniture | str) -> str:
+    assert isinstance(activity, Furniture)
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} is splashing around in the fountain. {say()}',
                        focus=activity.type) # 💦
 
-async def view_television(space: Space, activity: Object | str) -> str:
+async def view_television(space: Space, activity: Furniture | str) -> str:
     assert isinstance(activity, Television)
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} seems hooked by {activity.show}.',
                        focus=activity.type)
 
-async def view_newspaper(space: Space, activity: Object | str) -> str:
+async def view_newspaper(space: Space, activity: Furniture | str) -> str:
     assert isinstance(activity, Newspaper)
     pet = await space.get_pet()
     dot = '' if unicodedata.category(activity.article[-1]).startswith('P') else '.'
     return pet_message(pet, f'{space.pet_name} is reading an article. {activity.article}{dot}',
                        focus=activity.type)
 
-async def view_palette(space: Space, activity: Object | str) -> str:
+async def view_palette(space: Space, activity: Furniture | str) -> str:
     assert isinstance(activity, Palette)
     pet = await space.get_pet()
     if activity.state == '🖼️':

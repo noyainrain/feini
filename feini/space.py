@@ -35,7 +35,7 @@ from typing import Literal, cast, overload, TYPE_CHECKING
 from aioredis.exceptions import WatchError
 
 from . import context
-from .items import Object
+from .furniture import Furniture, FURNITURE_TYPES
 from .util import Pipeline, Redis, isemoji, randstr
 
 if TYPE_CHECKING:
@@ -47,6 +47,10 @@ CHARACTER_NAMES = {
 
 class Space:
     """TODO.
+
+    .. attribute:: time
+
+       Current simulation time.
 
     .. attribute:: trail_supply
 
@@ -165,7 +169,7 @@ class Space:
         """Get known blueprints."""
         return await context.bot.get().redis.zrange(f'{self.id}.blueprints', 0, -1)
 
-    async def get_objects(self) -> list[Object]:
+    async def get_objects(self) -> list[Furniture]:
         bot = context.bot.get()
         key = f'{self.id}.items'
         async with transaction(bot.redis, key) as pipe:
@@ -174,7 +178,7 @@ class Space:
             for item_id in item_ids:
                 pipe.hgetall(item_id)
             items = cast(list[dict[str, str]], await pipe.execute())
-            return [bot.object_types[data['type']](data) for data in items]
+            return [FURNITURE_TYPES[data['type']](data) for data in items]
 
     # clean
 
@@ -207,8 +211,16 @@ class Space:
         return await context.bot.get().get_object(self.pet_activity_id)
 
     async def tick(self, time: int) -> Space:
-        """Simulate space at *time*."""
+        """Simulate the space at *time* for one tick.
+
+        If *time* does not match the current simulation :attr:`time`, the operation is skipped.
+        """
         bot = context.bot.get()
+
+        pet = await self.get_pet()
+        await pet.tick()
+        for item in await self.get_objects():
+            await item.tick(time)
 
         async with bot.redis.pipeline() as pipe:
             furniture_key = f'{self.id}.items'
@@ -237,11 +249,6 @@ class Space:
 
             data = await cast(Awaitable[list[dict[str, str]]], pipe.execute())
             space = Space(data[-1])
-
-        pet = await self.get_pet()
-        await pet.tick()
-        for obj in await self.get_objects():
-            await obj.tick(time + 1)
 
         if pet_activity_id and pet_activity_id not in {'', '💤', '🍃'}:
             obj = await bot.get_object(pet_activity_id)
@@ -335,9 +342,9 @@ class Space:
 
     # clean
 
-    async def craft(self, blueprint: str) -> str | Object:
+    async def craft(self, blueprint: str) -> str | Furniture:
         """Craft a new object given by *blueprint*."""
-        if blueprint in context.bot.get().object_types:
+        if blueprint in FURNITURE_TYPES:
             return await self._craft_furniture_item(blueprint)
         return await self._craft_tool(blueprint)
 
@@ -381,7 +388,7 @@ class Space:
 
         # Note that if there is a crash creating the furniture item, we could create it later from
         # the reserved ID
-        return await bot.object_types[blueprint].create(object_id, blueprint)
+        return await FURNITURE_TYPES[blueprint].create(object_id, blueprint)
 
     async def sew(self, pattern: str) -> str:
         """Sew a new clothing item given by *pattern*."""

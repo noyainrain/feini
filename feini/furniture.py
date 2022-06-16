@@ -12,20 +12,28 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.
 # If not, see <https://www.gnu.org/licenses/>.
 
-"""Available furniture."""
+"""Available furniture.
+
+.. data:: FURNITURE_TYPES
+
+   Furniture classes.
+"""
 
 from __future__ import annotations
 
 import random
+from typing import TypeVar
 
 from . import context
+
+_S = TypeVar('_S', bound='Furniture')
 
 class Furniture:
     """Piece of furniture.
 
     .. attribute:: id
 
-       Furniture piece ID.
+       Furniture item ID.
 
     .. attribute:: type
 
@@ -38,18 +46,23 @@ class Furniture:
 
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Furniture:
-        """TODO."""
+        """Create a furniture item of the given *furniture_type* with *furniture_id*."""
         data = {'id': furniture_id, 'type': furniture_type}
         await context.bot.get().redis.hset(furniture_id, mapping=data)
         return Furniture(data)
 
-    # TODO OQ why pass time to tick? I think we do not need this anymore here, right?
-    # i mean it is nice to have the current time available, must not load it from db then...
+    async def get(self: _S) -> _S:
+        """Get a fresh copy of the furniture item."""
+        data = await context.bot.get().redis.hgetall(self.id)
+        if not data:
+            raise ReferenceError(self.id)
+        return type(self)(data)
+
     async def tick(self, time: int) -> None:
-        """TODO."""
+        """Simulate the furniture piece at *time* for one tick."""
 
     async def use(self) -> None:
-        """TODO."""
+        """Use the furniture piece."""
 
     def __str__(self) -> str:
         return self.type
@@ -60,35 +73,50 @@ class Furniture:
     def __hash__(self) -> int:
         return hash(self.id)
 
-class Plant(Furniture):
-    """Plant."""
+class Houseplant(Furniture):
+    """Houseplant.
+
+    .. attribute:: state
+
+       Current state emoji.
+    """
 
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
         self.state = data['state']
 
     @staticmethod
-    async def create(furniture_id: str, furniture_type: str) -> Plant:
-        data = {'id': id, 'type': '🪴', 'state': '🪴'}
-        await context.bot.get().redis.hset(id, mapping=data)
-        return Plant(data)
+    async def create(furniture_id: str, furniture_type: str) -> Houseplant:
+        data = {'id': furniture_id, 'type': '🪴', 'state': '🪴'}
+        await context.bot.get().redis.hset(furniture_id, mapping=data)
+        return Houseplant(data)
 
     async def tick(self, time: int) -> None:
-        if time % 24 == 0:
+        if (time + 1) % 24 == 0:
             await context.bot.get().redis.hset(self.id, 'state', random.choice(['🪴', '🌺']))
 
     def __str__(self) -> str:
         return self.state
 
-# https://developers.themoviedb.org/3/getting-started/popularity
 class Television(Furniture):
-    """Television."""
+    """Television set.
 
-    # https://www.rottentomatoes.com/browse/tv-list-2
-    SHOWS = [
-        'The Book of Boba Fett', 'Reacher', 'Euphoria',
+    .. attribute:: show
+
+       Current show.
+    """
+
+    # Retrieved from https://www.rottentomatoes.com/browse/tv-list-2 on Feb 14 2022
+    _SHOWS = [
+        'The Book of Boba Fett',
+        'Reacher',
+        'Euphoria',
         'The Woman In The House Across The Street From The Girl In The Window',
-        'All of Us Are Dead', 'Raised by Wolves', 'Peacemaker', 'Pam & Tommy', 'Inventing Anna',
+        'All of Us Are Dead',
+        'Raised by Wolves',
+        'Peacemaker',
+        'Pam & Tommy',
+        'Inventing Anna',
         'The Sinner'
     ]
 
@@ -98,27 +126,30 @@ class Television(Furniture):
 
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Television:
-        data = {'id': id, 'type': '📺', 'show': random.choice(Television.SHOWS)}
-        await context.bot.get().redis.hset(id, mapping=data)
+        data = {'id': furniture_id, 'type': '📺', 'show': random.choice(Television._SHOWS)}
+        await context.bot.get().redis.hset(furniture_id, mapping=data)
         return Television(data)
 
     async def use(self) -> None:
-        await context.bot.get().redis.hset(self.id, 'show', random.choice(self.SHOWS))
+        await context.bot.get().redis.hset(self.id, 'show', random.choice(self._SHOWS))
 
 class Newspaper(Furniture):
     """Newspaper.
 
     .. attribute:: article
 
-       TODO.
+       Opened article.
     """
 
-    ARTICLES = [
-        'Canada Live Updates: Crossings at Blockaded Canadian Bridge May Resume Soon as Police Move In',
+    # Retrieved from https://rss.nytimes.com/services/xml/rss/nyt/world.xml on Feb 14 2022
+    _ARTICLES = [
+        ('Canada Live Updates: Crossings at Blockaded Canadian Bridge May Resume Soon as Police '
+         'Move In'),
         'The Quiet Flight of Muslims From France',
         'Swiss Approve Ban on Tobacco Ads',
         'In Hawaii, Blinken Aims for a United Front With Allies on North Korea',
-        'Ukraine Live Updates: Airlines Suspend Flights as German Leader Warns of ‘Serious Threat to Peace’',
+        ('Ukraine Live Updates: Airlines Suspend Flights as German Leader Warns of ‘Serious Threat '
+         'to Peace’'),
         'Finland’s President Knows Putin Well. And He Fears for Ukraine.',
         'Biden’s Decision on Frozen Funds Stokes Anger Among Afghans',
         'Black Authors Shake Up Brazil’s Literary Scene',
@@ -132,19 +163,19 @@ class Newspaper(Furniture):
 
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Newspaper:
-        data = {'id': id, 'type': '🗞️', 'article': random.choice(Newspaper.ARTICLES)}
-        await context.bot.get().redis.hset(id, mapping=data)
+        data = {'id': furniture_id, 'type': '🗞️', 'article': random.choice(Newspaper._ARTICLES)}
+        await context.bot.get().redis.hset(furniture_id, mapping=data)
         return Newspaper(data)
 
     async def use(self) -> None:
-        await context.bot.get().redis.hset(self.id, 'article', random.choice(self.ARTICLES))
+        await context.bot.get().redis.hset(self.id, 'article', random.choice(self._ARTICLES))
 
 class Palette(Furniture):
     """Canvas and palette.
 
     .. attribute:: state
 
-       TODO.
+       Current state emoji.
     """
 
     def __init__(self, data: dict[str, str]) -> None:
@@ -153,13 +184,29 @@ class Palette(Furniture):
 
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Palette:
-        data = {'id': id, 'type': '🎨', 'state': '🎨'}
-        await context.bot.get().redis.hset(id, mapping=data)
+        data = {'id': furniture_id, 'type': '🎨', 'state': '🎨'}
+        await context.bot.get().redis.hset(furniture_id, mapping=data)
         return Palette(data)
 
     async def tick(self, time: int) -> None:
-        if time % 24 == 0:
+        if (time + 1) % 24 == 0:
             await context.bot.get().redis.hset(self.id, 'state', random.choice(['🎨', '🖼️']))
 
     def __str__(self) -> str:
         return self.state
+
+FURNITURE_TYPES = {
+    # Toys
+    '🪃': Furniture,
+    '⚾': Furniture,
+    '🧸': Furniture,
+    # Furniture
+    '🛋️': Furniture,
+    '🪴': Houseplant,
+    '⛲': Furniture,
+    # Devices
+    '📺': Television,
+    # Miscellaneous
+    '🗞️': Newspaper,
+    '🎨': Palette
+}

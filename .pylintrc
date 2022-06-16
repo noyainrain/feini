@@ -33,10 +33,6 @@ method-rgx=%(argument-rgx)s
 module-rgx=%(argument-rgx)s
 variable-rgx=%(argument-rgx)s
 
-#[format]
-## Long URLs and strings may be more readable
-#ignore-long-lines=://|'.+'|".+"
-
 #[classes] # <- maybe this is also mypy now
 ## Add initialize, it is used by Tornado
 #defining-attr-methods=__init__,__new__,setUp,initialize

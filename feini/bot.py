@@ -36,7 +36,7 @@ from .actions import (
     MainMode, Mode, view_sleep, view_leaves, view_boomerang, view_ball, view_teddy, view_couch,
     view_plant, view_fountain, view_television, view_newspaper, view_palette)
 from . import actions, context, updates
-from .items import Newspaper, Object, Plant, Palette, Television
+from .furniture import Furniture, FURNITURE_TYPES
 from .space import Pet, Space
 from .util import Redis, JSONObject, cancel, raise_for_status, randstr, recovery
 
@@ -129,21 +129,6 @@ class Bot:
         #print('ALTERNATIVES', self.alternatives)
 
         # TODO parse_entity()
-        self.object_types = {
-            # Toys
-            '🪃': Object,   # simple
-            '⚾': Object,   # simple
-            '🧸': Object,   # simple
-            # Furniture
-            '🛋️': Object,   # simple
-            '🪴': Plant,  # state
-            '⛲': Object,   # simple
-            # CE
-            '📺': Television,   # variation
-            # Other
-            '🗞️': Newspaper,   # variation
-            '🎨': Palette # state
-        }
 
     # clean
 
@@ -337,9 +322,9 @@ class Bot:
     async def get_space(self, id: str) -> Space:
         return Space(await self.redis.hgetall(id))
 
-    async def get_object(self, id: str) -> Object:
-        data = await self.redis.hgetall(id)
-        return self.object_types[data['type']](data)
+    async def get_furniture_item(self, furniture_id: str) -> Furniture:
+        data = await self.redis.hgetall(furniture_id)
+        return FURNITURE_TYPES[data['type']](data)
 
     async def create_space(self, chat: str) -> Space:
         async with self.redis.pipeline() as pipe:

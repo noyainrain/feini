@@ -1,17 +1,34 @@
-from feini.items import Newspaper, Plant, Palette, Television
+# Open Feini
+# Copyright (C) 2022 Open Feini contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software Foundation, either version 3 of
+# the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.
+# If not, see <https://www.gnu.org/licenses/>.
+
+# pylint: disable=missing-docstring
+
+from feini.furniture import Houseplant, Newspaper, Palette, Television
 from feini.space import Space
-from .test_space import FeiniTestCase
+from .test_bot import FeiniTestCase
 
-class PlantTest(FeiniTestCase):
+TRIALS = 1000
+
+class HouseplantTest(FeiniTestCase):
     async def test_tick(self) -> None:
-        await self.obtain(Space.COSTS['🪴'])
+        await self.space.obtain(*Space.COSTS['🪴'])
         plant = await self.space.craft('🪴')
-        assert isinstance(plant, Plant)
+        assert isinstance(plant, Houseplant)
 
-        for _ in range(1000):
-            await plant.tick(0)
-            plant = await self.bot.get_object(plant.id)
-            assert isinstance(plant, Plant)
+        for time in range(TRIALS):
+            await plant.tick(time)
+            plant = await plant.get()
             if plant.state == '🌺':
                 break
         else:
@@ -19,15 +36,14 @@ class PlantTest(FeiniTestCase):
 
 class TelevisionTest(FeiniTestCase):
     async def test_use(self) -> None:
-        await self.obtain(Space.COSTS['📺'])
+        await self.space.obtain(*Space.COSTS['📺'])
         tv = await self.space.craft('📺')
         assert isinstance(tv, Television)
         show = tv.show
 
-        for _ in range(1000):
+        for _ in range(TRIALS):
             await tv.use()
-            tv = await self.bot.get_object(tv.id)
-            assert isinstance(tv, Television)
+            tv = await tv.get()
             if tv.show != show:
                 break
         else:
@@ -35,16 +51,14 @@ class TelevisionTest(FeiniTestCase):
 
 class NewspaperTest(FeiniTestCase):
     async def test_use(self) -> None:
-        await self.obtain(Space.COSTS['🗞️'])
+        await self.space.obtain(*Space.COSTS['🗞️'])
         newspaper = await self.space.craft('🗞️')
         assert isinstance(newspaper, Newspaper)
         article = newspaper.article
 
-        for _ in range(1000):
+        for _ in range(TRIALS):
             await newspaper.use()
-            newspaper = await self.bot.get_object(newspaper.id)
-            assert isinstance(newspaper, Newspaper)
-            print(_, newspaper.article)
+            newspaper = await newspaper.get()
             if newspaper.article != article:
                 break
         else:
@@ -52,14 +66,13 @@ class NewspaperTest(FeiniTestCase):
 
 class PaletteTest(FeiniTestCase):
     async def test_tick(self) -> None:
-        await self.obtain(Space.COSTS['🎨'])
+        await self.space.obtain(*Space.COSTS['🎨'])
         palette = await self.space.craft('🎨')
         assert isinstance(palette, Palette)
 
-        for _ in range(1000):
-            await palette.tick(0)
-            palette = await self.bot.get_object(palette.id)
-            assert isinstance(palette, Palette)
+        for time in range(TRIALS):
+            await palette.tick(time)
+            palette = await palette.get()
             if palette.state == '🖼️':
                 break
         else:

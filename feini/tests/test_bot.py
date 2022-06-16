@@ -14,9 +14,55 @@
 
 # pylint: disable=missing-docstring
 
+from unittest import IsolatedAsyncioTestCase
+
+from feini import context
 from feini.actions import HikeMode
-from feini.space import Hike
-from .test_space import FeiniTestCase
+from feini.bot import Bot
+from feini.space import Hike, Space
+
+class FeiniTestCase(IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.bot = Bot(debug=True)
+        context.bot.set(self.bot)
+        self.space = await self.bot.create_space('local')
+
+    async def asyncTearDown(self) -> None:
+        await self.bot.close()
+
+    async def obtain(self, resources: list[str]) -> None:
+        space = await self.bot.get_space(self.space.id)
+        if '🪵'  in resources and '🪓' not in space.tools:
+            await self.obtain(Space.COSTS['🪓'])
+            await space.craft('🪓')
+        if '🧶' in resources and '✂️' not in space.tools:
+            await self.obtain(Space.COSTS['✂️'])
+            await space.craft('✂️')
+
+        resources = list(resources)
+        while True:
+            obtained = []
+            if '🥕' in resources or '🪨' in resources:
+                obtained += await space.gather_meadow()
+            if '🪵' in resources:
+                obtained += await space.chop_wood()
+            if '🧶' in resources:
+                obtained += await space.use('✂️')
+            for resource in obtained:
+                try:
+                    resources.remove(resource)
+                except ValueError:
+                    pass
+            if not resources:
+                break
+            space = await self.bot.get_space(self.space.id)
+            await space.tick(space.time)
+
+            #await self.space.gather_meadow()
+            #space = await context.bot.get().get_space(self.space.id)
+            #if space.resources.count('🥕') >= veggies:
+            #    break
+            #await space.tick(space.time)
 
 class BotTest(FeiniTestCase):
     async def test_get_set_mode(self) -> None:

@@ -17,60 +17,15 @@
 # /clean
 
 from itertools import cycle, islice
-from unittest import IsolatedAsyncioTestCase
 
-from feini import context
-from feini.bot import Bot
 from feini.context import bot
-from feini.items import Plant
+from feini.furniture import Houseplant
 from feini.space import Hike, Space
+from .test_bot import FeiniTestCase
 
 #class FeiniTestCase(IsolatedAsyncioTestCase):
 #    async def asyncSetUp(self) -> None:
 #        context.bot.set(Bot())
-
-class FeiniTestCase(IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.bot = Bot(debug=True)
-        context.bot.set(self.bot)
-        self.space = await self.bot.create_space('local')
-
-    async def asyncTearDown(self) -> None:
-        await self.bot.close()
-
-    async def obtain(self, resources: list[str]) -> None:
-        space = await self.bot.get_space(self.space.id)
-        if '🪵'  in resources and '🪓' not in space.tools:
-            await self.obtain(Space.COSTS['🪓'])
-            await space.craft('🪓')
-        if '🧶' in resources and '✂️' not in space.tools:
-            await self.obtain(Space.COSTS['✂️'])
-            await space.craft('✂️')
-
-        resources = list(resources)
-        while True:
-            obtained = []
-            if '🥕' in resources or '🪨' in resources:
-                obtained += await space.gather_meadow()
-            if '🪵' in resources:
-                obtained += await space.chop_wood()
-            if '🧶' in resources:
-                obtained += await space.use('✂️')
-            for resource in obtained:
-                try:
-                    resources.remove(resource)
-                except ValueError:
-                    pass
-            if not resources:
-                break
-            space = await self.bot.get_space(self.space.id)
-            await space.tick(space.time)
-
-            #await self.space.gather_meadow()
-            #space = await context.bot.get().get_space(self.space.id)
-            #if space.resources.count('🥕') >= veggies:
-            #    break
-            #await space.tick(space.time)
 
 # clean
 
@@ -165,7 +120,7 @@ class SpaceTest(FeiniTestCase):
         await self.space.obtain(*Space.COSTS['🪴'])
         plant = await self.space.craft('🪴')
         space = await self.space.get()
-        self.assertIsInstance(plant, Plant)
+        self.assertIsInstance(plant, Houseplant)
         self.assertEqual(await space.get_objects(), [plant]) # type: ignore[misc]
         self.assertFalse(space.resources)
 
