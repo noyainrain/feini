@@ -17,13 +17,13 @@
 from __future__ import annotations
 
 from asyncio import CancelledError, Task
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import random
 import re
 from string import ascii_lowercase
 import sys
-from typing import Awaitable, Literal, Type, TypeVar, cast, overload
+from typing import Literal, Type, TypeVar, overload
 import unicodedata
 
 from aiohttp import ClientResponse, ClientResponseError
@@ -111,104 +111,59 @@ class JSONObject(dict[str, object]):
         return value
 
 class Redis(aioredis.client.Redis):
-    """Redis client with supplemented type annotations."""
+    """Supplemented Redis client type annotations."""
 
-    @classmethod
-    def from_url(cls, url: str, **kwargs: object) -> Redis:
-        return cast(Redis, super().from_url(url, **kwargs))
+    # pylint: disable=multiple-statements
 
-    def pipeline(self, transaction: bool = True, shard_hint: str | None = None) -> Pipeline:
-        return Pipeline(self.connection_pool, self.response_callbacks, transaction, shard_hint)
+    def pipeline(self, transaction: bool = ..., shard_hint: str | None = ...) -> Pipeline: ...
+    async def close(self) -> None: ...
 
-    async def close(self) -> None:
-        await cast(Awaitable[None], super().close()) # type: ignore[no-untyped-call]
-
-    def blpop(self, keys: KeysT, timeout: TimeoutSecT = 0) -> Awaitable[tuple[str, str] | None]:
-        return cast('Awaitable[tuple[str, str] | None]', super().blpop(keys, timeout))
-
-    def exists(self, *names: KeyT) -> Awaitable[int]:
-        return cast(Awaitable[int], super().exists(*names))
-
-    def hexists(self, name: KeyT, key: FieldT) -> Awaitable[bool]:
-        return cast(Awaitable[bool], super().hexists(name, key))
-
-    def hget(self, name: KeyT, key: FieldT) -> Awaitable[str | None]:
-        return cast('Awaitable[str | None]', super().hget(name, key))
-
-    def hgetall(self, name: KeyT) -> Awaitable[dict[str, str]]:
-        return cast(Awaitable[dict[str, str]], super().hgetall(name))
-
-    def hmget(self, name: KeyT, keys: Sequence[KeyT], *args: FieldT) -> Awaitable[list[str | None]]:
-        return cast('Awaitable[list[str | None]]', super().hmget(name, keys, *args))
-
-    def hset(self, name: KeyT, key: FieldT | None = None, value: EncodableT | None = None,
-             mapping: Mapping[AnyFieldT, EncodableT] | None = None) -> Awaitable[int]:
-        return cast(Awaitable[int], super().hset(name, key, value, mapping))
-
-    def hvals(self, name: KeyT) -> Awaitable[list[str]]:
-        return cast(Awaitable[list[str]], super().hvals(name))
-
-    def lrange(self, name: KeyT, start: int, end: int) -> Awaitable[list[str]]:
-        return cast(Awaitable[list[str]], super().lrange(name, start, end))
-
-    def smembers(self, name: KeyT) -> Awaitable[list[str]]:
-        return cast(Awaitable[list[str]], super().smembers(name))
-
-    def zadd(
-        self, name: KeyT, mapping: Mapping[AnyKeyT, EncodableT], nx: bool = False, xx: bool = False,
-        ch: bool = False, incr: bool = False
-    ) -> Awaitable[int | float | None]:
-        return cast('Awaitable[int | float | None]', super().zadd(name, mapping, nx, xx, ch, incr))
+    def blpop(self, keys: KeysT,
+              timeout: TimeoutSecT = ...) -> Awaitable[tuple[str, str] | None]: ...
+    def exists(self, *names: KeyT) -> Awaitable[int]: ...
+    def hexists(self, name: KeyT, key: FieldT) -> Awaitable[bool]: ...
+    def hget(self, name: KeyT, key: FieldT) -> Awaitable[str | None]: ...
+    def hgetall(self, name: KeyT) -> Awaitable[dict[str, str]]: ...
+    def hmget(self, name: KeyT, keys: Sequence[KeyT],
+              *args: FieldT) -> Awaitable[list[str | None]]: ...
+    def hset(self, name: KeyT, key: FieldT | None = ..., value: EncodableT | None = ...,
+             mapping: Mapping[AnyFieldT, EncodableT] | None = ...) -> Awaitable[int]: ...
+    def hvals(self, name: KeyT) -> Awaitable[list[str]]: ...
+    def lrange(self, name: KeyT, start: int, end: int) -> Awaitable[list[str]]: ...
+    def smembers(self, name: KeyT) -> Awaitable[list[str]]: ...
+    def zadd(self, name: KeyT, mapping: Mapping[AnyKeyT, EncodableT], nx: bool = ...,
+             xx: bool = ..., ch: bool = ..., incr: bool = ...) -> Awaitable[int | float | None]: ...
 
     @overload # type: ignore[override]
     def zrange(self, name: KeyT, start: int, end: int, desc: bool,
-               withscores: Literal[True]) -> Awaitable[list[tuple[str, float]]]:
-        pass
+               withscores: Literal[True]) -> Awaitable[list[tuple[str, float]]]: ...
     @overload
     def zrange(self, name: KeyT, start: int, end: int, desc: bool, withscores: Literal[True],
-               score_cast_func: Callable[[str], _T]) -> Awaitable[list[tuple[str, _T]]]:
-        pass
+               score_cast_func: Callable[[str], _T]) -> Awaitable[list[tuple[str, _T]]]: ...
     @overload
-    def zrange(self, name: KeyT, start: int, end: int, desc: bool = False, *,
-               withscores: Literal[True]) -> Awaitable[list[tuple[str, float]]]:
-        pass
+    def zrange(self, name: KeyT, start: int, end: int, desc: bool = ..., *,
+               withscores: Literal[True]) -> Awaitable[list[tuple[str, float]]]: ...
     @overload
     def zrange(
-        self, name: KeyT, start: int, end: int, desc: bool = False, *, withscores: Literal[True],
-        score_cast_func: Callable[[str], _T]) -> Awaitable[list[tuple[str, _T]]]:
-        pass
+        self, name: KeyT, start: int, end: int, desc: bool = ..., *, withscores: Literal[True],
+        score_cast_func: Callable[[str], _T]) -> Awaitable[list[tuple[str, _T]]]: ...
     @overload
     def zrange(
-        self, name: KeyT, start: int, end: int, desc: bool = False,
-        withscores: Literal[False] = False,
-        score_cast_func: Callable[[str], _T] = float # type: ignore[assignment]
-    ) -> Awaitable[list[str]]:
-        pass
+        self, name: KeyT, start: int, end: int, desc: bool = ..., withscores: Literal[False] = ...,
+        score_cast_func: Callable[[str], _T] = ...
+    ) -> Awaitable[list[str]]: ...
     def zrange(
-        self, name: KeyT, start: int, end: int, desc: bool = False, withscores: bool = False,
-        score_cast_func: Callable[[str], _T] = float # type: ignore[assignment]
-    ) -> Awaitable[list[str] | list[tuple[str, _T]]]:
-        return cast('Awaitable[list[str] | list[tuple[str, _T]]]',
-                    super().zrange(name, start, end, desc, withscores, score_cast_func))
+        self, name: KeyT, start: int, end: int, desc: bool = ..., withscores: bool = ...,
+        score_cast_func: Callable[[str], _T] = ...
+    ) -> Awaitable[list[str] | list[tuple[str, _T]]]: ...
 
-    def zscore(self, name: str, value: EncodableT) -> Awaitable[float | None]:
-        return cast('Awaitable[float | None]', super().zscore(name, value))
+    def zscore(self, name: str, value: EncodableT) -> Awaitable[float | None]: ...
 
 class Pipeline(aioredis.client.Pipeline, Redis):
-    """Redis pipeline with supplemented type annotations."""
+    """Supplemented Redis pipeline type annotations."""
 
-    def multi(self) -> None:
-        super().multi() # type: ignore[no-untyped-call]
+    # pylint: disable=multiple-statements
 
-    async def execute(self, raise_on_error: bool = True) -> list[object]:
-        return await cast(Awaitable[list[object]], super().execute(raise_on_error))
-
-    async def watch(self, *names: KeyT) -> bool:
-        return await cast(Awaitable[bool], super().watch(*names))
-
-#from typing import Protocol
-#
-#class Peter:
-#    """X"""
-#    def oink(self, inputs: list[str]) -> list[int]:
-#        """Y"""
+    def multi(self) -> None: ...
+    async def execute(self, raise_on_error: bool = True) -> list[object]: ...
+    async def watch(self, *names: KeyT) -> bool: ...

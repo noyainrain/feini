@@ -67,7 +67,9 @@ class Bot:
         self.debug = debug
         # TODO handle redis_url error
         # TODO handle redis errors (in all event loops)
-        self.redis = Redis.from_url(redis_url, decode_responses=True)
+        # self.redis = Redis.from_url(redis_url, decode_responses=True)
+        import aioredis.client
+        self.redis = cast(Redis, aioredis.client.Redis.from_url(redis_url, decode_responses=True))
         self.http = ClientSession(timeout=ClientTimeout(total=20))
         self.telegram = Telegram(telegram_key) if telegram_key else None
 
