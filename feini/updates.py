@@ -24,6 +24,37 @@ from . import context
 from .space import Space
 from .util import randstr
 
+async def update_space_stories() -> None:
+    updates = 0
+    bot = context.bot.get()
+    redis = bot.redis
+    for space_id in await redis.hvals('spaces_by_chat'):
+        chapter = await redis.hget(space_id, 'story')
+        if chapter is not None:
+            async with redis.pipeline() as pipe:
+                pipe.multi()
+                stories = [{
+                    'id': f'SewingStory:{randstr()}',
+                    'space_id': space_id,
+                    'chapter': 'scissors',
+                    'update_time': str(bot.time)
+                }]
+                if chapter:
+                    stories.append({
+                        'id': f'IntroStory:{randstr()}',
+                        'space_id': space_id,
+                        'chapter': chapter,
+                        'update_time': str(bot.time)
+                    })
+                for story in stories:
+                    pipe.hset(story['id'], mapping=story)
+                    pipe.sadd(f'{space_id}.stories', story['id'])
+                pipe.hdel(space_id, 'story')
+                await pipe.execute()
+                updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Space.stories (%d)', updates)
+
 async def update_space_blueprints() -> None:
     updates = 0
     redis = context.bot.get().redis

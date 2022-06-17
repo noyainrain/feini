@@ -30,13 +30,16 @@ from itertools import chain
 import random
 from random import randint, shuffle
 import sys
-from typing import Literal, cast, overload
+from typing import Literal, cast, overload, TYPE_CHECKING
 
 from aioredis.exceptions import WatchError
 
 from . import context
 from .items import Object
 from .util import Pipeline, Redis, isemoji, randstr
+
+if TYPE_CHECKING:
+    from .stories import Story
 
 CHARACTER_NAMES = {
     '👻': 'Ghost'
@@ -151,7 +154,6 @@ class Space:
         self.pet_nutrition = int(data['pet_nutrition'])
         self.pet_fur = int(data['pet_fur'])
         self.pet_activity_id = data['pet_activity_id']
-        self.story = data['story']
 
     async def get_pet(self) -> Pet:
         return Pet(await context.bot.get().redis.hgetall(self.pet_id))
@@ -183,6 +185,19 @@ class Space:
         characters = (await redis.hgetall(character_id) for character_id in ids)
         return [Character(data) # type: ignore[misc]
                 async for data in characters if data] # type: ignore[attr-defined,misc]
+
+    async def get_stories(self) -> set[Story]:
+        """Get all ongoing stories."""
+        def parse_story(data: dict[str, str]) -> Story:
+            # pylint: disable=import-outside-toplevel
+            from . import stories
+            cls = cast('type[Story]', getattr(stories, data['id'].split(':')[0]))
+            return cls(data)
+        redis = context.bot.get().redis
+        ids = await redis.smembers(f'{self.id}.stories')
+        stories = (await redis.hgetall(story_id) for story_id in ids)
+        return {parse_story(data) # type: ignore[misc]
+                async for data in stories if data} # type: ignore[attr-defined,misc]
 
     # /clean
 
@@ -454,6 +469,14 @@ class Space:
                 resources = sorted(space.resources + hike.gathered, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'trail_supply': 0})
             await pipe.execute()
+
+    async def tell_stories(self) -> None:
+        """Continue all ongoing stories."""
+        for story in await self.get_stories():
+            try:
+                await story.tell()
+            except ReferenceError:
+                pass
 
     # /clean
 

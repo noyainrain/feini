@@ -158,7 +158,24 @@ class MainMode(Mode):
 
     # pylint: disable=no-self-use,unused-argument
 
-    _DIALOGUE = {}
+    _DIALOGUE = {
+        'ghost-sewing-hello': ['Where am I?'],
+        'ghost-sewing-daughter': [
+            '(Ghost looks at a piece of cloth in their hands) The last thing I remember is sitting '
+            'in my chair, making a scarf for my daughter. She always used to like those… I think…'
+        ],
+        'ghost-sewing-request': [
+            'Dear, do you know where I could find {items} to finish this scarf?',
+            'If I only had {items}, I could finish this scarf.'
+        ],
+        'ghost-sewing-blueprint': [
+            '(You give {items} to Ghost) Thank you so much, dear! Please, let me return the favor '
+            'and tell you a few things about sewing! (You get a sewing needle blueprint 📋)'
+        ],
+        'ghost-sewing-goodbye': [
+            'Do you think she will forgive me? (Ghost slowly vanishes into thin air)'
+        ]
+    }
 
     @action('⛺')
     async def view_home(self, space: Space, *args: str) -> str:
@@ -738,6 +755,37 @@ async def pet_hungry_message(space: Space) -> str:
 async def pet_dirty_message(space: Space) -> str:
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} is pretty dirty.', focus='💩')
+
+# clean
+
+@event_message('space-explain-touch')
+async def space_explain_touch_message(space: Space) -> str:
+    return 'ℹ️ You can touch the egg by sending a 👋 emoji. What will happen?'
+
+@event_message('space-explain-gather')
+async def space_explain_gather_message(space: Space) -> str:
+    return f'ℹ️ {space.pet_name} looks hungry. You can gather some veggies with 🧺.'
+
+@event_message('space-explain-feed')
+async def space_explain_feed_message(space: Space) -> str:
+    return f'ℹ️ You can now feed {space.pet_name} with 🥕.'
+
+@event_message('space-explain-craft')
+async def space_explain_craft_message(space: Space) -> str:
+    return (f'ℹ️ You can craft tools and furniture for {space.pet_name} with 🔨. You can currently '
+            'afford to craft an axe with 🔨🪓.')
+
+@event_message('space-explain-basics')
+async def space_explain_basics_message(space: Space) -> str:
+    return ('ℹ️ All items are placed in the tent. You can view it with ⛺. You can watch and pet '
+            f'{space.pet_name} any time with 👋.')
+
+@event_message('space-visit-ghost')
+async def space_visit_ghost_message(space: Space) -> str:
+    pet = await space.get_pet()
+    return pet_message(pet, f'{space.pet_name} has seen a ghost. {say()}', focus='👻', mood='😮')
+
+# /clean
 
 @event_message('space-stroll-compass-blueprint')
 async def space_stroll_compass_blueprint_message(space: Space) -> str:

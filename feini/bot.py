@@ -40,40 +40,6 @@ from .items import Newspaper, Object, Plant, Palette, Television
 from .space import Pet, Space
 from .util import Redis, JSONObject, cancel, raise_for_status, randstr, recovery
 
-class Story:
-    def __init__(self) -> None:
-        pass
-
-    # bot.send_message(space, f'ℹ️  You can give it a name with ✏️, e.g. ✏️ Feini.')
-    async def update(self, space: Space) -> None:
-        bot = context.bot.get()
-        async with bot.redis.pipeline() as pipe:
-            await pipe.watch(space.id)
-            space = Space(await pipe.hgetall(space.id))
-            pipe.multi()
-            if space.story == 'touch' and not space.pet_is_egg:
-                pipe.hset(space.id, 'story', 'gather')
-                bot.send(
-                    Message(
-                        space.chat,
-                        f'ℹ️  {space.pet_name} seems hungry. You can gather some veggies with 🧺.'))
-            elif space.story == 'gather' and '🥕' in space.resources:
-                pipe.hset(space.id, 'story', 'feed')
-                bot.send(Message(space.chat, f'ℹ️  You can now feed {space.pet_name} with 🥕.'))
-            elif space.story == 'feed' and space.pet_nutrition == Space.PET_NUTRITION_MAX:
-                pipe.hset(space.id, 'story', 'craft')
-                bot.send(
-                    Message(
-                        space.chat,
-                        f'ℹ️  You can craft tools and furniture for {space.pet_name} with 🔨. You can currently afford to craft an axe with 🔨🪓.'))
-            elif space.story == 'craft' and '🪓' in space.tools:
-                pipe.hset(space.id, 'story', '')
-                bot.send(
-                    Message(
-                        space.chat,
-                        f'ℹ️  All items are placed in the tent. You can view it with ⛺. You can watch and pet {space.pet_name} any time with 👋.'))
-            await pipe.execute()
-
 class Bot:
     """Open Feini chatbot.
 
@@ -294,8 +260,11 @@ class Bot:
         return f'🍽️🐕 {space.pet_name} is hungry. {say()}'
 
     async def run(self) -> None:
+        TICK = 60 * 60
+
         context.bot.set(self)
 
+        self.time = int(datetime.now().timestamp() / TICK)
         await self.update()
 
         events_task = create_task(self._handle_events())
@@ -305,8 +274,6 @@ class Bot:
             inbox_task = create_task(self._handle_inbox(self.telegram))
             outbox_task = create_task(self._handle_outbox(self.telegram))
 
-        TICK = 60 * 60
-
         now = datetime.now().timestamp()
         now = now // TICK
 
@@ -315,8 +282,6 @@ class Bot:
 
         try:
             while True:
-                self.time = int(datetime.now().timestamp() / TICK)
-
                 space_ids = await cast(Awaitable[list[str]], self.redis.hvals('spaces_by_chat'))
                 for space_id in space_ids:
                     #space = Space(
@@ -324,13 +289,17 @@ class Bot:
                     space = await self.get_space(space_id)
                     while space.time < self.time:
                         space = await space.tick(space.time)
+                    create_task(space.tell_stories())
+
                         #print(
                         #    space.id, space.pet_name, space.time, 'M', space.meadow_vegetable_growth,
                         #    'W', space.woods_growth, 'F', space.pet_fur, 'N', space.pet_nutrition)
                         ##    [item.type for item in await space.get_objects()])
 
                 logger.info('Simulated world at tick %d', self.time)
+
                 await sleep((self.time + 1) * TICK - datetime.now().timestamp())
+                self.time = int(datetime.now().timestamp() / TICK)
 
         except CancelledError:
             await cancel(events_task)
@@ -349,22 +318,18 @@ class Bot:
         logger = getLogger(__name__)
 
         space_id = await self.redis.hget('spaces_by_chat', chat)
-        if space_id:
-            space = await self.get_space(space_id)
-        else:
+        if not space_id:
             space = await self.create_space(chat)
-            self.send(Message(space.chat, '🥚 You found an egg. 😮'))
+            create_task(space.tell_stories())
             logger.info('Created space for %s (%s)', chat, space.pet_name)
-            # OQ maybe better to start story with 'initial' state and send this message there? how
-            # would we handle the first message of a quest (when the player starts it with an
-            # action)?
-            return 'ℹ️  You can touch the egg by sending a 👋 emoji. What will happen?'
+            return '🥚 You found an egg. 😮'
 
+        space = await self.get_space(space_id)
         tokens = self._parse(action)
         tokens = [self.alternatives.get(token, token) for token in tokens]
 
         reply = await self.get_mode(chat).perform(space, *tokens)
-        create_task(Story().update(space))
+        create_task(space.tell_stories())
 
         logger.info('%s (%s): %s', chat, space.pet_name, ' '.join(tokens))
         return reply
@@ -396,8 +361,7 @@ class Bot:
                 'pet_is_egg': 'true',
                 'pet_nutrition': str(Space.INTERVAL_S),
                 'pet_fur': '0',
-                'pet_activity_id': '',
-                'story': 'touch'
+                'pet_activity_id': ''
             }
             pet_data = {
                 'id': pet_id,
@@ -412,6 +376,24 @@ class Bot:
             pipe.zadd(f'{space_id}.blueprints',
                       {blueprint: Space.BLUEPRINT_WEIGHTS[blueprint] for blueprint in blueprints})
             pipe.hset(pet_id, mapping=pet_data)
+
+            stories = [
+                {
+                    'id': f'IntroStory:{randstr()}',
+                    'space_id': space_id,
+                    'chapter': 'start',
+                    'update_time': str(self.time)
+                }, {
+                    'id': f'SewingStory:{randstr()}',
+                    'space_id': space_id,
+                    'chapter': 'scissors',
+                    'update_time': str(self.time)
+                }
+            ]
+            for story in stories:
+                pipe.hset(story['id'], mapping=story)
+                pipe.sadd(f'{space_id}.stories', story['id'])
+
             pipe.hset('spaces_by_chat', chat, data['id'])
             await pipe.execute()
 
@@ -493,6 +475,7 @@ class Bot:
                     f = event_messages[event_type]
                     reply = await shield(f(space))
                     self.send(Message(space.chat, reply))
+                    logger.info('%s (%s): %s', space.chat, space.pet_name, event_type)
 
         except CancelledError:
             logger.info('Stopped event queue')

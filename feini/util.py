@@ -161,6 +161,9 @@ class Redis(aioredis.client.Redis):
 
     # clean
 
+    def smembers(self, name: KeyT) -> Awaitable[list[str]]:
+        return cast(Awaitable[list[str]], super().smembers(name))
+
     def zadd(
         self, name: KeyT, mapping: Mapping[AnyKeyT, EncodableT], nx: bool = False, xx: bool = False,
         ch: bool = False, incr: bool = False
