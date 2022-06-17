@@ -14,13 +14,21 @@
 
 # pylint: disable=missing-docstring
 
-from unittest import TestCase
+from asyncio import Task, create_task, sleep
+from string import ascii_lowercase
+from unittest import IsolatedAsyncioTestCase, TestCase
 
 from aiohttp import ClientResponseError, web
 from aiohttp.test_utils import AioHTTPTestCase
 from aiohttp.web import Application, HTTPNotImplemented, Request, Response
 
-from feini.util import JSONObject, isemoji, raise_for_status, truncate
+from feini.util import JSONObject, cancel, isemoji, raise_for_status, randstr, truncate
+
+class RandstrTest(TestCase):
+    def test(self) -> None:
+        string = randstr()
+        self.assertEqual(len(string), 16)
+        self.assertLessEqual(set(string), set(ascii_lowercase)) # type: ignore[misc]
 
 class TruncateTest(TestCase):
     def test(self) -> None:
@@ -41,6 +49,12 @@ class IsEmojiTest(TestCase):
 
     def test_string(self) -> None:
         self.assertFalse(isemoji('⭐A'))
+
+class CancelTest(IsolatedAsyncioTestCase):
+    async def test(self) -> None:
+        task: Task[None] = create_task(sleep(1))
+        await cancel(task)
+        self.assertTrue(task.cancelled())
 
 class RaiseForStatusTest(AioHTTPTestCase):
     @staticmethod
@@ -67,5 +81,3 @@ class JSONObjectTest(TestCase):
     def test_get_bad_item_type(self) -> None:
         with self.assertRaisesRegex(TypeError, 'name'):
             self.cat.get('name', cls=int)
-
-# /clean

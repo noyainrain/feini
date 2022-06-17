@@ -11,6 +11,7 @@ disable=
 #    # There are built-ins with common names like id
 #    redefined-builtin
     # Handled by mypy
+    classes,
     typecheck
 
 [reports]

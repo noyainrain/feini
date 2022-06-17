@@ -67,7 +67,7 @@ class Bot:
         self.debug = debug
         # TODO handle redis_url error
         # TODO handle redis errors (in all event loops)
-        self.redis = cast(Redis, Redis.from_url(redis_url, decode_responses=True))
+        self.redis = Redis.from_url(redis_url, decode_responses=True)
         self.http = ClientSession(timeout=ClientTimeout(total=20))
         self.telegram = Telegram(telegram_key) if telegram_key else None
 
@@ -267,19 +267,20 @@ class Bot:
 
         try:
             while True:
-                space_ids = await cast(Awaitable[list[str]], self.redis.hvals('spaces_by_chat'))
-                for space_id in space_ids:
-                    #space = Space(
-                    #    await cast(Awaitable[dict[str, str]], self.redis.hgetall(f'Space:{space_id}')))
-                    space = await self.get_space(space_id)
-                    while space.time < self.time:
-                        space = await space.tick(space.time)
-                    create_task(space.tell_stories())
+                with recovery():
+                    space_ids = await cast(Awaitable[list[str]], self.redis.hvals('spaces_by_chat'))
+                    for space_id in space_ids:
+                        #space = Space(
+                        #    await cast(Awaitable[dict[str, str]], self.redis.hgetall(f'Space:{space_id}')))
+                        space = await self.get_space(space_id)
+                        while space.time < self.time:
+                            space = await space.tick(space.time)
+                        create_task(space.tell_stories())
 
-                        #print(
-                        #    space.id, space.pet_name, space.time, 'M', space.meadow_vegetable_growth,
-                        #    'W', space.woods_growth, 'F', space.pet_fur, 'N', space.pet_nutrition)
-                        ##    [item.type for item in await space.get_objects()])
+                            #print(
+                            #    space.id, space.pet_name, space.time, 'M', space.meadow_vegetable_growth,
+                            #    'W', space.woods_growth, 'F', space.pet_fur, 'N', space.pet_nutrition)
+                            ##    [item.type for item in await space.get_objects()])
 
                 logger.info('Simulated world at tick %d', self.time)
 

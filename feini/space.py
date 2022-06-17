@@ -367,7 +367,7 @@ class Space:
             await pipe.execute()
         return blueprint
 
-    async def _craft_furniture_item(self, blueprint: str) -> Object:
+    async def _craft_furniture_item(self, blueprint: str) -> Furniture:
         bot = context.bot.get()
         object_id = f'Object:{randstr()}'
 

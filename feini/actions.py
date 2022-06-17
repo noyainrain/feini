@@ -29,7 +29,7 @@ from typing import ClassVar, Generic, Protocol, TypeVar, cast, overload
 import unicodedata
 
 from . import context
-from .furniture import Furniture, Houseplant, Newspaper, Palette, Television
+from .furniture import Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_TYPES
 from .space import Hike, Pet, Space, CHARACTER_NAMES
 from .util import isemoji
 
@@ -250,9 +250,8 @@ class MainMode(Mode):
                     'Tools': [
                         blueprint for blueprint in blueprints
                         if blueprint in space.ITEM_CATEGORIES['tool']],
-                    'Furniture': [
-                        blueprint for blueprint in blueprints
-                        if blueprint in context.bot.get().object_types]
+                    'Furniture': [blueprint
+                                  for blueprint in blueprints if blueprint in FURNITURE_TYPES]
                 }
                 line_break = '\n                    '
                 catalog_material = {
