@@ -420,7 +420,8 @@ class MainMode(Mode):
         if activity == '':
             return pet_message(pet, random.choice([f'{space.pet_name} wags its tail.', say(1)]))
         symbol = activity.type if isinstance(activity, Furniture) else activity
-        f = context.bot.get().activities[symbol]
+        # f = context.bot.get().activities[symbol]
+        f = _ACTIVITY_MESSAGES[symbol]
         return await f(space, activity)
 
     @item_action('🥕')
@@ -643,6 +644,22 @@ async def view_palette(space: Space, activity: Furniture | str) -> str:
     else:
         text = f'{space.pet_name} is painting something with passion.'
     return pet_message(pet, text, focus=activity.state)
+
+#self.activities: dict[str, Callable[[Space, Object | str], Awaitable[str]]] = {
+#self.activities = {
+_ACTIVITY_MESSAGES: dict[str, Callable[[Space, Furniture | str], Awaitable[str]]] = {
+    '💤': view_sleep,
+    '🍃': view_leaves,
+    '🪃': view_boomerang,
+    '⚾': view_ball,
+    '🧸': view_teddy,
+    '🛋️': view_couch,
+    '🪴': view_plant,
+    '⛲': view_fountain,
+    '📺': view_television,
+    '🗞️': view_newspaper,
+    '🎨': view_palette
+}
 
 #class listener:
 #    def __init__(self, arg: ListenerFunction | ) -> None:

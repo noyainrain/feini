@@ -14,12 +14,10 @@
 
 """Open Feini chatbot."""
 
-# /clean
-
 from __future__ import annotations
 
 import asyncio
-from asyncio import CancelledError, Queue, shield, sleep, create_task
+from asyncio import CancelledError, Queue, create_task, shield, sleep
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -31,66 +29,52 @@ import unicodedata
 from urllib.parse import urljoin
 
 from aiohttp import ClientError, ClientPayloadError, ClientSession, ClientTimeout
+import aioredis.client
 
-from .actions import (
-    MainMode, Mode, view_sleep, view_leaves, view_boomerang, view_ball, view_teddy, view_couch,
-    view_plant, view_fountain, view_television, view_newspaper, view_palette)
 from . import actions, context, updates
+from .actions import MainMode, Mode
 from .furniture import Furniture, FURNITURE_TYPES
 from .space import Pet, Space
-from .util import Redis, JSONObject, cancel, raise_for_status, randstr, recovery
+from .util import JSONObject, Redis, cancel, raise_for_status, randstr, recovery
 
 class Bot:
     """Open Feini chatbot.
 
     .. attribute:: time
 
-       TODO.
+       Current time in ticks.
 
     .. attribute:: redis
 
-       Redis database.
+       Redis client.
 
-    .. attribute:: redis_url
+    .. attribute:: http
 
-       TODO.
+       HTTP client.
+
+    .. attribute:: telegram
+
+       Telegram messenger client, if configured.
 
     .. attribute:: debug
 
        Indicates if debug mode is enabled.
     """
 
-    def __init__(self, *, redis_url: str = 'redis:', debug: bool = False,
-                 telegram_key: str | None = None) -> None:
+    def __init__(self, *, redis_url: str = 'redis:', telegram_key: str | None = None,
+                 debug: bool = False) -> None:
         self.time = 0
-        self.redis_url = redis_url
-        self.debug = debug
-        # TODO handle redis_url error
-        # TODO handle redis errors (in all event loops)
-        # self.redis = Redis.from_url(redis_url, decode_responses=True)
-        import aioredis.client
-        self.redis = cast(Redis, aioredis.client.Redis.from_url(redis_url, decode_responses=True))
+        try:
+            self.redis = cast(Redis,
+                              aioredis.client.Redis.from_url(redis_url, decode_responses=True))
+        except ValueError as e:
+            raise ValueError(f'Bad redis_url {redis_url}') from e
         self.http = ClientSession(timeout=ClientTimeout(total=20))
         self.telegram = Telegram(telegram_key) if telegram_key else None
+        self.debug = debug
 
         self._chat_modes: dict[str, Mode] = {}
         self._outbox: Queue[Message] = Queue()
-
-        # TODO move to actions / mode
-        self.activities: dict[str, Callable[[Space, Object | str], Awaitable[str]]] = {
-        #self.activities = {
-            '💤': view_sleep,
-            '🍃': view_leaves,
-            '🪃': view_boomerang,
-            '⚾': view_ball,
-            '🧸': view_teddy,
-            '🛋️': view_couch,
-            '🪴': view_plant,
-            '⛲': view_fountain,
-            '📺': view_television,
-            '🗞️': view_newspaper,
-            '🎨': view_palette
-        }
 
         # TODO in actions.py: (use on first action arg and match with actions, so maybe in Mode)
         #def normalize_emoji(emoji: str) -> str:

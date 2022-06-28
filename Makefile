@@ -48,7 +48,6 @@ show-deprecated:
 .PHONY: release
 release:
 	scripts/release.sh
-	{REPO=repo} {BRANCH=branch} scripts/publish-doc.sh
 
 .PHONY: micro-link
 micro-link:

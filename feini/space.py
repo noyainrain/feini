@@ -251,7 +251,7 @@ class Space:
             space = Space(data[-1])
 
         if pet_activity_id and pet_activity_id not in {'', '💤', '🍃'}:
-            obj = await bot.get_object(pet_activity_id)
+            obj = await bot.get_furniture_item(pet_activity_id)
             await obj.use()
 
         return space
