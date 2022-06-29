@@ -76,46 +76,6 @@ class Bot:
         self._chat_modes: dict[str, Mode] = {}
         self._outbox: Queue[Message] = Queue()
 
-        # TODO in actions.py: (use on first action arg and match with actions, so maybe in Mode)
-        #def normalize_emoji(emoji: str) -> str:
-        #    """TODO. emoji variations, multiple emojis expressing the same concept and text alias.
-        #    normalize. *emoji* may also be a text representation"""
-        #    try:
-        #        return _EMOJI_VARIANTS[emoji]
-        #    except KeyError:
-        #        return emoji
-        # https://unicode.org/emoji/charts/text-style.html
-        # https://unicode.org/emoji/charts/emoji-list.html
-        alternatives = {
-            '🎧': ['🎧\N{VARIATION SELECTOR-15}', '🎧\N{VARIATION SELECTOR-16}'],
-            '👓': ['👓\N{VARIATION SELECTOR-15}', '👓\N{VARIATION SELECTOR-16}'],
-            '🕶️': ['🕶', '🕶\N{VARIATION SELECTOR-15}'],
-            '👋': ['👋\N{VARIATION SELECTOR-16}', '🤚', '🤚\N{VARIATION SELECTOR-16}', '🖐️', '🖐︎',
-                   '✋', '✋\N{VARIATION SELECTOR-16}'],
-            '✏️': ['✏', '🖊️', '🖊'],
-            '🔨': ['⚒️', '⚒', '🛠️', '🛠'],
-            '🧽': ['🧴', '🧼'],
-            '✂️': ['✂'],
-            '🪃': ['🥏'],
-            '⚾': ['⚾\N{VARIATION SELECTOR-16}', '🥎'],
-            '🛋️': ['🛋'],
-            '⛲': ['⛲\N{VARIATION SELECTOR-16}'],
-            '📺': ['📺\N{VARIATION SELECTOR-16}'],
-            '🗞️': ['🗞', '📰'],
-            '⛺': ['⛺\N{VARIATION SELECTOR-16}', '🏕️', '🏕'],
-            '➡️': ['➡', '➡\N{VARIATION SELECTOR-15}'],
-            '⬇️': ['⬇', '⬇\N{VARIATION SELECTOR-15}'],
-            '⬅️': ['⬅', '⬅\N{VARIATION SELECTOR-15}'],
-            '⬆️': ['⬆', '⬆\N{VARIATION SELECTOR-15}'],
-            '🔙': ['🔚']
-        }
-        self.alternatives = {
-            alt: can for can, alts in alternatives.items() for alt in alts
-        }
-        #print('ALTERNATIVES', self.alternatives)
-
-        # TODO parse_entity()
-
     # clean
 
     async def close(self) -> None:
@@ -298,7 +258,7 @@ class Bot:
 
         space = await self.get_space(space_id)
         tokens = self._parse(action)
-        tokens = [self.alternatives.get(token, token) for token in tokens]
+        # tokens = [self.alternatives.get(token, token) for token in tokens]
 
         reply = await self.get_mode(chat).perform(space, *tokens)
         create_task(space.tell_stories())

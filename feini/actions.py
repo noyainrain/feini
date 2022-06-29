@@ -99,7 +99,7 @@ class Mode:
         A reaction message is returned.
         """
         try:
-            f = self._actions[args[0]].__get__(self)
+            f = self._actions[normalize_emoji(args[0])].__get__(self)
         except (KeyError, IndexError):
             f = self.default
         return await f(space, *args)
@@ -140,6 +140,47 @@ def entity_action(entity_type: str) -> Callable[[_EntityActionCallable], Action[
             return await func(self, space, entity, *args)
         return Action(wrapper, name=entity_type)
     return decorator
+
+# TODO in actions.py: (use on first action arg and match with actions, so maybe in Mode)
+_EMOJI_VARIANTS = {
+    '🪨': ['🧱'],
+    '🧶': ['🧵', '🪢'],
+    '🎧': ['🎧\N{VARIATION SELECTOR-15}', '🎧\N{VARIATION SELECTOR-16}'],
+    '👓': ['👓\N{VARIATION SELECTOR-15}', '👓\N{VARIATION SELECTOR-16}'],
+    '🕶️': ['🕶', '🕶\N{VARIATION SELECTOR-15}'],
+    '👋': ['🤚', '🖐️', '🖐', '🖐\N{VARIATION SELECTOR-15}', '✋', '🖖'],
+    '✏️': ['✏', '✏\N{VARIATION SELECTOR-15}', '✒️', '✒', '✒\N{VARIATION SELECTOR-15}', '🖋️', '🖋',
+          '🖋\N{VARIATION SELECTOR-15}', '🖊️', '🖊', '🖊\N{VARIATION SELECTOR-15}'],
+    '🧺': ['🪣'],
+    '✂️': ['✂', '✂\N{VARIATION SELECTOR-15}'],
+    '🔨': ['⚒️', '⚒', '⚒\N{VARIATION SELECTOR-15}', '🛠️', '🛠', '🛠\N{VARIATION SELECTOR-15}'],
+    '🍳': ['🔪'],
+    '🧽': ['🧴', '🧼'],
+    '⚾': ['⚾\N{VARIATION SELECTOR-15}', '⚾\N{VARIATION SELECTOR-16}', '🥎'],
+    '🛋️': ['🛋', '🛋\N{VARIATION SELECTOR-15}'],
+    '⛲': ['⛲\N{VARIATION SELECTOR-15}', '⛲\N{VARIATION SELECTOR-16}'],
+    '📺': ['📺\N{VARIATION SELECTOR-15}', '📺\N{VARIATION SELECTOR-16}'],
+    '🗞️': ['🗞', '🗞\N{VARIATION SELECTOR-15}', '📰'],
+    '🎨': ['🖌️', '🖌', '🖌\N{VARIATION SELECTOR-15}'],
+    '⛺': ['⛺\N{VARIATION SELECTOR-15}', '⛺\N{VARIATION SELECTOR-16}', '🏕️', '🏕',
+           '🏕\N{VARIATION SELECTOR-15}'],
+    '➡️': ['➡', '➡\N{VARIATION SELECTOR-15}'],
+    '⬇️': ['⬇', '⬇\N{VARIATION SELECTOR-15}'],
+    '⬅️': ['⬅', '⬅\N{VARIATION SELECTOR-15}'],
+    '⬆️': ['⬆', '⬆\N{VARIATION SELECTOR-15}'],
+    '🔙': ['🔚'],
+    '✴️': ['✴', '✴\N{VARIATION SELECTOR-15}'],
+    '📍': ['📌']
+}
+_EMOJI_NORMAL_FORMS = {
+    variant: emoji for emoji, variants in _EMOJI_VARIANTS.items() for variant in variants
+}
+print('VARIANTS', _EMOJI_NORMAL_FORMS)
+
+def normalize_emoji(emoji: str) -> str:
+    """TODO. emoji variations, multiple emojis expressing the same concept and text alias.
+    normalize. *emoji* may also be a text representation"""
+    return _EMOJI_NORMAL_FORMS.get(emoji, emoji)
 
 def pet_message(pet: Pet, text: str, *, focus: str = '', mood: str = '') -> str:
     """Write a message about *pet* containing *text*.
@@ -191,7 +232,8 @@ class MainMode(Mode):
         """)
 
     async def _view_resource(self, space: Space, *args: str) -> str:
-        return random.choice([f'{args[0]} Good quality!', f'{args[0]} Beautiful!'])
+        resource = normalize_emoji(args[0])
+        return random.choice([f'{resource} Good quality!', f'{resource} Beautiful!'])
 
     view_resource = item_action('🪨')(_view_resource)
     _view_wood = item_action('🪵')(_view_resource)
@@ -199,7 +241,7 @@ class MainMode(Mode):
 
     @action('obtain')
     async def obtain(self, space: Space, *args: str) -> str:
-        items = args[1:] or ['_']
+        items = [normalize_emoji(item) for item in args[1:]] or ['_']
         try:
             await space.obtain(*items)
         except ValueError as e:
@@ -235,7 +277,7 @@ class MainMode(Mode):
     @item_action('🔨')
     async def craft(self, space: Space, *args: str) -> str:
         try:
-            blueprint = args[1]
+            blueprint = normalize_emoji(args[1])
         except IndexError:
             blueprint = '_'
 
@@ -276,7 +318,7 @@ class MainMode(Mode):
     @item_action('🪡')
     async def sew(self, space: Space, *args: str) -> str:
         try:
-            pattern = args[1]
+            pattern = normalize_emoji(args[1])
         except IndexError:
             pattern = '_'
 
@@ -303,7 +345,7 @@ class MainMode(Mode):
             raise
 
     async def _dress_pet(self, space: Space, *args: str) -> str:
-        clothing = args[0]
+        clothing = normalize_emoji(args[0])
         pet = await space.get_pet()
 
         if pet.clothing == clothing:
@@ -388,7 +430,7 @@ class MainMode(Mode):
 
     @action('👻')
     async def talk_to_character(self, space: Space, *args: str) -> str:
-        avatar = args[0]
+        avatar = normalize_emoji(args[0])
         character = next(
             (character for character in await space.get_characters() if character.avatar == avatar),
             None)
@@ -470,7 +512,7 @@ class MainMode(Mode):
         ])
 
     async def default(self, space: Space, *args: str) -> str:
-        word = args[0] if isemoji(args[0]) else f'“{args[0]}”'
+        word = normalize_emoji(args[0]) if isemoji(args[0]) else f'“{args[0]}”'
         return f'You have no {word} at the moment. Maybe have a look in the tent ⛺?'
 
 # clean
@@ -491,7 +533,7 @@ class HikeMode(Mode):
 
     async def _move(self, space: Space, *args: str) -> str:
         try:
-            move = await self.hike.move(args)
+            move = await self.hike.move([normalize_emoji(direction) for direction in args])
         except ValueError as e:
             if 'directions' in str(e):
                 return await self.default(space)
