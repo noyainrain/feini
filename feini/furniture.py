@@ -14,6 +14,10 @@
 
 """Available furniture.
 
+.. data:: FURNITURE_MATERIAL
+
+   Material needed for each furniture item.
+
 .. data:: FURNITURE_TYPES
 
    Furniture classes.
@@ -22,18 +26,28 @@
 from __future__ import annotations
 
 import random
-from typing import TypeVar
 
 from . import context
+from .core import Entity
 
-_S = TypeVar('_S', bound='Furniture')
+FURNITURE_MATERIAL = {
+    # Toys
+    '🪃': ['🪵', '🪵'], # S
+    '⚾': ['🪵', '🪵', '🧶', '🧶', '🧶'], # S
+    '🧸': ['🪨', '🧶', '🧶', '🧶', '🧶'], # S
+    # Furniture
+    '🛋️': ['🪨', '🪵', '🪵', '🪵', '🪵', '🧶', '🧶', '🧶', '🧶'], # L
+    '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵', '🪵'], # M
+    '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L
+    # Devices
+    '📺': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
+    # Miscellaneous
+    '🗞️': ['🪵', '🪵', '🪵',  '🧶'], # S
+    '🎨': ['🪵', '🪵', '🪵', '🪵', '🪨', '🧶', '🧶'] # M
+}
 
-class Furniture:
+class Furniture(Entity):
     """Piece of furniture.
-
-    .. attribute:: id
-
-       Furniture item ID.
 
     .. attribute:: type
 
@@ -41,7 +55,7 @@ class Furniture:
     """
 
     def __init__(self, data: dict[str, str]) -> None:
-        self.id = data['id']
+        super().__init__(data)
         self.type = data['type']
 
     @staticmethod
@@ -51,13 +65,6 @@ class Furniture:
         await context.bot.get().redis.hset(furniture_id, mapping=data)
         return Furniture(data)
 
-    async def get(self: _S) -> _S:
-        """Get a fresh copy of the furniture item."""
-        data = await context.bot.get().redis.hgetall(self.id)
-        if not data:
-            raise ReferenceError(self.id)
-        return type(self)(data)
-
     async def tick(self, time: int) -> None:
         """Simulate the furniture piece at *time* for one tick."""
 
@@ -66,12 +73,6 @@ class Furniture:
 
     def __str__(self) -> str:
         return self.type
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Furniture) and self.id == other.id
-
-    def __hash__(self) -> int:
-        return hash(self.id)
 
 class Houseplant(Furniture):
     """Houseplant.

@@ -14,20 +14,13 @@
 
 """Short stories."""
 
-from typing import TypeVar
-
 from . import context
+from .core import Entity
 from .space import Message, Space
 from .util import randstr
 
-_S = TypeVar('_S', bound='Story')
-
-class Story:
+class Story(Entity):
     """Short story.
-
-    .. attribute:: id
-
-       Story ID.
 
     .. attribute:: space_id
 
@@ -43,17 +36,10 @@ class Story:
     """
 
     def __init__(self, data: dict[str, str]) -> None:
-        self.id = data['id']
+        super().__init__(data)
         self.space_id = data['space_id']
         self.chapter = data['chapter']
         self.update_time = int(data['update_time'])
-
-    async def get(self: _S) -> _S:
-        """Get a fresh copy of the story."""
-        data = await context.bot.get().redis.hgetall(self.id)
-        if not data:
-            raise ReferenceError(self.id)
-        return type(self)(data)
 
     async def get_space(self) -> Space:
         """Get the related space."""
@@ -62,12 +48,6 @@ class Story:
     async def tell(self) -> None:
         """Continue to the next point in the story if the relevant conditions are met."""
         raise NotImplementedError()
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Story) and self.id == other.id
-
-    def __hash__(self) -> int:
-        return hash(self.id)
 
 class IntroStory(Story):
     """Tutorial."""

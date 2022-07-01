@@ -14,7 +14,7 @@
 
 # pylint: disable=missing-docstring
 
-from feini.furniture import Houseplant, Newspaper, Palette, Television
+from feini.furniture import Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL
 from feini.space import Space
 from .test_bot import FeiniTestCase
 
@@ -22,7 +22,7 @@ TRIALS = 1000
 
 class HouseplantTest(FeiniTestCase):
     async def test_tick(self) -> None:
-        await self.space.obtain(*Space.COSTS['🪴'])
+        await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
         plant = await self.space.craft('🪴')
         assert isinstance(plant, Houseplant)
 
@@ -36,7 +36,7 @@ class HouseplantTest(FeiniTestCase):
 
 class TelevisionTest(FeiniTestCase):
     async def test_use(self) -> None:
-        await self.space.obtain(*Space.COSTS['📺'])
+        await self.space.obtain(*FURNITURE_MATERIAL['📺'])
         tv = await self.space.craft('📺')
         assert isinstance(tv, Television)
         show = tv.show
@@ -51,7 +51,7 @@ class TelevisionTest(FeiniTestCase):
 
 class NewspaperTest(FeiniTestCase):
     async def test_use(self) -> None:
-        await self.space.obtain(*Space.COSTS['🗞️'])
+        await self.space.obtain(*FURNITURE_MATERIAL['🗞️'])
         newspaper = await self.space.craft('🗞️')
         assert isinstance(newspaper, Newspaper)
         article = newspaper.article
@@ -66,7 +66,7 @@ class NewspaperTest(FeiniTestCase):
 
 class PaletteTest(FeiniTestCase):
     async def test_tick(self) -> None:
-        await self.space.obtain(*Space.COSTS['🎨'])
+        await self.space.obtain(*FURNITURE_MATERIAL['🎨'])
         palette = await self.space.craft('🎨')
         assert isinstance(palette, Palette)
 

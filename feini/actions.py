@@ -180,7 +180,7 @@ print('VARIANTS', _EMOJI_NORMAL_FORMS)
 def normalize_emoji(emoji: str) -> str:
     """TODO. emoji variations, multiple emojis expressing the same concept and text alias.
     normalize. *emoji* may also be a text representation"""
-    return _EMOJI_NORMAL_FORMS.get(emoji, emoji)
+    return _EMOJI_NORMAL_FORMS.get(emoji) or emoji
 
 def pet_message(pet: Pet, text: str, *, focus: str = '', mood: str = '') -> str:
     """Write a message about *pet* containing *text*.
@@ -451,7 +451,7 @@ class MainMode(Mode):
     async def touch(self, space: Space, *args: str) -> str:
         pet = await space.get_pet()
         await space.touch_pet()
-        if space.pet_is_egg:
+        if space.pet_hatched:
             return f'🥚 Crack! 🐕 {space.pet_name} hatched from the egg. It looks around curiously. 😊'
         if space.pet_nutrition == 0:
             return pet_message(pet, f'{space.pet_name} looks hungry.', focus='🍽️')

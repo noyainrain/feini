@@ -19,7 +19,7 @@
 from itertools import cycle, islice
 
 from feini.context import bot
-from feini.furniture import Houseplant
+from feini.furniture import Houseplant, FURNITURE_MATERIAL
 from feini.space import Hike, Space
 from .test_bot import FeiniTestCase
 
@@ -47,7 +47,7 @@ class SpaceTest(FeiniTestCase):
         await self.space.obtain('🪵', '🧶', '🥕')
         await self.space.obtain('🪵')
         space = await self.space.get()
-        self.assertEqual(space.resources, ['🥕', '🪵', '🪵', '🧶']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🥕', '🪵', '🪵', '🧶']) # type: ignore[misc]
 
     # /clean
 
@@ -55,11 +55,11 @@ class SpaceTest(FeiniTestCase):
         await self.space.gather_meadow()
         await self.space.feed_pet()
         space = await bot.get().get_space(self.space.id)
-        self.assertEqual(space.resources, ['🪨']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🪨']) # type: ignore[misc]
         self.assertEqual(space.pet_nutrition, space.PET_NUTRITION_MAX)
 
     async def test_feed_pet_no_vegetable(self) -> None:
-        with self.assertRaisesRegex(ValueError, 'resources'):
+        with self.assertRaisesRegex(ValueError, 'items'):
             await self.space.feed_pet()
 
     async def test_feed_pet_full(self) -> None:
@@ -72,7 +72,7 @@ class SpaceTest(FeiniTestCase):
         resources = await self.space.gather_meadow()
         space = await bot.get().get_space(self.space.id)
         self.assertEqual(resources, ['🥕', '🪨']) # type: ignore[misc]
-        self.assertEqual(space.resources, resources)
+        self.assertEqual(space.items, resources)
         self.assertEqual(space.meadow_vegetable_growth, 0)
 
     async def test_gather_meadow_empty(self) -> None:
@@ -81,12 +81,12 @@ class SpaceTest(FeiniTestCase):
         self.assertFalse(resources)
 
     async def test_chop_wood(self) -> None:
-        await self.obtain(Space.COSTS['🪓'])
+        await self.obtain(Space.TOOL_MATERIAL['🪓'])
         await self.space.craft('🪓')
         wood = await self.space.chop_wood()
         space = await self.bot.get_space(self.space.id)
         self.assertEqual(wood, ['🪵']) # type: ignore[misc]
-        self.assertEqual(space.resources, ['🥕', '🪵']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🥕', '🪵']) # type: ignore[misc]
         self.assertEqual(space.woods_growth, 0)
 
     # test_chop_woods empty
@@ -100,7 +100,7 @@ class SpaceTest(FeiniTestCase):
         wool = await self.space.use('✂️')
         space = await self.space.get()
         self.assertEqual(wool, ['🧶']) # type: ignore[misc]
-        self.assertEqual(space.resources, ['🧶']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🧶']) # type: ignore[misc]
         self.assertEqual(space.pet_fur, 0)
 
     async def test_use_scissors_no_pet_fur(self) -> None:
@@ -109,27 +109,28 @@ class SpaceTest(FeiniTestCase):
         self.assertFalse(wool)
 
     async def test_craft(self) -> None:
-        await self.space.obtain(*Space.COSTS['🪓'])
+        await self.space.obtain(*Space.TOOL_MATERIAL['🪓'])
         axe = await self.space.craft('🪓')
         space = await self.space.get()
         self.assertEqual(axe, '🪓')
         self.assertEqual(space.tools, [*self.space.tools, '🪓']) # type: ignore[misc]
-        self.assertFalse(space.resources)
+        self.assertFalse(space.items)
 
     async def test_craft_furniture_item(self) -> None:
-        await self.space.obtain(*Space.COSTS['🪴'])
+        await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
         plant = await self.space.craft('🪴')
         space = await self.space.get()
-        self.assertIsInstance(plant, Houseplant)
+        assert isinstance(plant, Houseplant)
         self.assertEqual(await space.get_objects(), [plant]) # type: ignore[misc]
-        self.assertFalse(space.resources)
+        self.assertEqual(await self.bot.get_furniture_item(plant.id), plant)
+        self.assertFalse(space.items)
 
     async def test_craft_unknown_blueprint(self) -> None:
         with self.assertRaisesRegex(ValueError, 'blueprint'):
             await self.space.craft('🪡')
 
     async def test_craft_no_resources(self) -> None:
-        with self.assertRaisesRegex(ValueError, 'resources'):
+        with self.assertRaisesRegex(ValueError, 'items'):
             await self.space.craft('🪴')
 
     async def test_sew(self) -> None:
@@ -137,11 +138,11 @@ class SpaceTest(FeiniTestCase):
         ribbon = await self.space.sew('🎀')
         space = await self.space.get()
         self.assertEqual(ribbon, '🎀')
-        self.assertEqual(space.resources, ['🎀']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🎀']) # type: ignore[misc]
 
     async def test_sew_no_resources(self) -> None:
         await self.space.obtain('🪡')
-        with self.assertRaisesRegex(ValueError, 'resources'):
+        with self.assertRaisesRegex(ValueError, 'items'):
             await self.space.sew('🎀')
 
     # /clean
@@ -174,7 +175,7 @@ class PetTest(FeiniTestCase):
         space = await self.space.get()
         pet = await space.get_pet()
         self.assertEqual(pet.clothing, '🎀')
-        self.assertFalse(space.resources)
+        self.assertFalse(space.items)
 
     async def test_dress_no_clothing(self) -> None:
         await self.space.obtain('🎀')
@@ -183,12 +184,12 @@ class PetTest(FeiniTestCase):
         space = await self.space.get()
         pet = await space.get_pet()
         self.assertIsNone(pet.clothing)
-        self.assertEqual(space.resources, ['🎀']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🎀']) # type: ignore[misc]
 
 class HikeTest(FeiniTestCase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
-        await self.space.obtain(*Space.COSTS['🧭'])
+        await self.space.obtain(*Space.TOOL_MATERIAL['🧭'])
         await self.space.craft('🧭')
         self.hike = await self.space.hike()
 
@@ -211,7 +212,7 @@ class HikeTest(FeiniTestCase):
         space = await self.space.get()
         self.assertTrue(self.hike.finished)
         self.assertEqual(self.hike.gathered, [self.hike.resource]) # type: ignore[misc]
-        self.assertEqual(space.resources, [self.hike.resource]) # type: ignore[misc]
+        self.assertEqual(space.items, [self.hike.resource]) # type: ignore[misc]
         self.assertEqual(space.trail_supply, 0)
 
     async def test_move_destination_empty_space_trail_supply(self) -> None:
@@ -223,7 +224,7 @@ class HikeTest(FeiniTestCase):
         await hike.move(hike.find_path('📍'))
         space = await self.space.get()
         self.assertFalse(hike.gathered)
-        self.assertFalse(space.resources[1:])
+        self.assertFalse(space.items[1:])
         self.assertEqual(space.trail_supply, 0)
 
     async def test_move_bad_directions_length(self) -> None:

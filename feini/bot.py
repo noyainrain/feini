@@ -23,6 +23,7 @@ from datetime import datetime
 from functools import partial
 import json
 from json import JSONDecodeError
+from inspect import iscoroutinefunction, signature
 from logging import getLogger
 from typing import Awaitable, AsyncIterator, Callable, cast
 import unicodedata
@@ -46,7 +47,7 @@ class Bot:
 
     .. attribute:: redis
 
-       Redis client.
+       Redis database client.
 
     .. attribute:: http
 
@@ -59,7 +60,13 @@ class Bot:
     .. attribute:: debug
 
        Indicates if debug mode is enabled.
+
+    .. attribute:: TICK
+
+       Duration of a tick in seconds.
     """
+
+    TICK = 60 * 60
 
     def __init__(self, *, redis_url: str = 'redis:', telegram_key: str | None = None,
                  debug: bool = False) -> None:
@@ -76,7 +83,53 @@ class Bot:
         self._chat_modes: dict[str, Mode] = {}
         self._outbox: Queue[Message] = Queue()
 
-    # clean
+    async def update(self) -> None:
+        """Update the database."""
+        def isupdate(obj: object) -> bool:
+            return (iscoroutinefunction(obj) and
+                    not signature(obj).parameters) # type: ignore[arg-type]
+        # Use vars() instead of getmembers() to preserve order
+        functions = [
+            cast(Callable[[], Awaitable[None]], member)
+            for member in cast(dict[str, object], vars(updates)).values() if isupdate(member)]
+        for update in reversed(functions):
+            await update()
+
+    async def run(self) -> None:
+        """Run the bot continuously."""
+        context.bot.set(self)
+        self.time = int(datetime.now().timestamp() / self.TICK)
+        await self.update()
+
+        events_task = create_task(self._handle_events())
+        inbox_task = None
+        outbox_task = None
+        if self.telegram:
+            inbox_task = create_task(self._handle_inbox(self.telegram))
+            outbox_task = create_task(self._handle_outbox(self.telegram))
+
+        logger = getLogger(__name__)
+        logger.info('Started bot')
+
+        try:
+            while True:
+                with recovery():
+                    for space in await self.get_spaces():
+                        for time in range(space.time, self.time):
+                            await space.tick(time)
+                        create_task(space.tell_stories())
+                    logger.info('Simulated world at tick %d', self.time)
+                await sleep((self.time + 1) * self.TICK - datetime.now().timestamp())
+                self.time = int(datetime.now().timestamp() / self.TICK)
+
+        except CancelledError:
+            await cancel(events_task)
+            if inbox_task:
+                await cancel(inbox_task)
+            if outbox_task:
+                await cancel(outbox_task)
+            logger.info('Stopped bot')
+            raise
 
     async def close(self) -> None:
         """Close the database connection."""
@@ -89,6 +142,27 @@ class Bot:
             pass
         await self.http.close()
 
+    async def perform(self, chat: str, action: str) -> str:
+        """Perform an action for the given *chat*.
+
+        The *action* string consists of arguments, where an argument is either an emoji or a word. A
+        reaction message is returned.
+        """
+        logger = getLogger(__name__)
+        try:
+            space = await self.get_space_by_chat(chat)
+        except KeyError:
+            space = await self.create_space(chat)
+            create_task(space.tell_stories())
+            logger.info('Created space for %s (%s)', chat, space.pet_name)
+            return '🥚 You found an egg. 😮'
+
+        args = self._parse_action(action)
+        reply = await self.get_mode(chat).perform(space, *args)
+        create_task(space.tell_stories())
+        logger.info('%s (%s): %s', chat, space.pet_name, ' '.join(args))
+        return reply
+
     def get_mode(self, chat: str) -> Mode:
         """Get the current mode of *chat*."""
         return self._chat_modes.get(chat) or MainMode()
@@ -100,179 +174,47 @@ class Bot:
         else:
             self._chat_modes[chat] = mode
 
-    def send(self, message: Message) -> None:
-        """Send a *message*."""
-        self._outbox.put_nowait(message)
+    async def get_spaces(self) -> set[Space]:
+        """Get all spaces."""
+        ids = await self.redis.hvals('spaces_by_chat')
+        spaces = (await self.redis.hgetall(space_id) for space_id in ids)
+        return {Space(data) async for data in spaces if data} # type: ignore[attr-defined,misc]
 
-    async def _handle_inbox(self, telegram: Telegram) -> None:
-        logger = getLogger(__name__)
-        logger.info('Started Telegram inbox')
-        try:
-            while True:
-                try:
-                    async for message in telegram.inbox():
-                        reply = '⚠️ Oops, something went very wrong! We will fix the problem as soon as possible. Meanwhile, you may try again.'
-                        with recovery():
-                            reply = await shield(self.perform(message.chat, message.text))
-                        self.send(Message(message.chat, reply))
-                except ClientError as e:
-                    logger.warning('Failed to receive Telegram messages (%s)', e)
-                    await sleep(1)
-        except CancelledError:
-            logger.info('Stopped Telegram inbox')
-            raise
+    async def get_space(self, space_id: str) -> Space:
+        """Get the space given by *space_id*."""
+        if not space_id.startswith('Space:'):
+            raise ValueError(f'Bad space_id {space_id}')
+        data = await self.redis.hgetall(space_id)
+        if not data:
+            raise KeyError(space_id)
+        return Space(data)
 
-    async def _handle_outbox(self, telegram: Telegram) -> None:
-        logger = getLogger(__name__)
-        logger.info('Started Telegram outbox')
-        try:
-            while True:
-                message = await self._outbox.get()
-                try:
-                    with recovery():
-                        while True:
-                            try:
-                                await telegram.send(message)
-                                break
-                            except ClientError as e:
-                                logger.warning('Failed to send Telegram message (%s)', e)
-                                await sleep(1)
-                finally:
-                    self._outbox.task_done()
-        except CancelledError:
-            logger.info('Stopped Telegram outbox')
-            raise
-
-    # /clean
-
-    async def update(self) -> None:
-        from inspect import iscoroutinefunction, signature
-        for name, f in reversed(cast(dict[str, object], vars(updates)).items()):
-            if name.startswith('update_'):
-                assert iscoroutinefunction(f) and not signature(f).parameters # type: ignore[arg-type]
-                await cast(Callable[[], Awaitable[None]], f)()
-
-                # Will fail with with a TypeError if f is not callable or takes any arguments or
-                # does not return a
-                # Will fail with TypeError, that's fine
-                # await f() # type: ignore[misc,operator]
-
-
-        #reveal_type(x)
-        #x = await cast(Callable[[], Awaitable[None]], f)()
-        #assert iscoroutinefunction(f)
-        #x = await cast(Callable[[], Awaitable[None]], f)()
-        #reveal_type(x)
-        #x = cast(object, f())
-        #assert isawaitable(x)
-        #await x
-        #reveal_type(x)
-        #version = tuple(int(c) for c in (await self.redis.get('version') or '0.0.0').split('.'))
-        #if version < (0, 0, 1):
-        #    space_ids = await self.redis.hvals('spaces_by_chat')
-        #    for space_id in space_ids:
-        #        space = Space(await self.redis.hgetall(space_id))
-        #        self.send_message(space, '✏️ Your pen is working again.')
-        #    await self.redis.set('version', '0.0.1')
-        #version = tuple(int(c) for c in (await self.redis.get('version') or '0.0.0').split('.'))
-        #if version < (0, 0, 1):
-        #    space_ids = await self.redis.hvals('spaces_by_chat')
-        #    async with self.redis.pipeline() as pipe:
-        #        pipe.rpush('events', *(f'{id}.update-pen' for id in space_ids))
-        #        pipe.set('version', '0.0.1')
-        #        await pipe.execute()
-
-    @staticmethod
-    async def space_update_pen(space: Space) -> str:
-        return '✏️ Your pen is working again.'
-
-    @staticmethod
-    async def space_pet_is_hungry(space: Space) -> str:
-        return f'🍽️🐕 {space.pet_name} is hungry. {say()}'
-
-    async def run(self) -> None:
-        TICK = 60 * 60
-
-        context.bot.set(self)
-
-        self.time = int(datetime.now().timestamp() / TICK)
-        await self.update()
-
-        events_task = create_task(self._handle_events())
-        inbox_task = None
-        outbox_task = None
-        if self.telegram:
-            inbox_task = create_task(self._handle_inbox(self.telegram))
-            outbox_task = create_task(self._handle_outbox(self.telegram))
-
-        now = datetime.now().timestamp()
-        now = now // TICK
-
-        logger = getLogger(__name__)
-        logger.info('Started bot')
-
-        try:
-            while True:
-                with recovery():
-                    space_ids = await cast(Awaitable[list[str]], self.redis.hvals('spaces_by_chat'))
-                    for space_id in space_ids:
-                        #space = Space(
-                        #    await cast(Awaitable[dict[str, str]], self.redis.hgetall(f'Space:{space_id}')))
-                        space = await self.get_space(space_id)
-                        while space.time < self.time:
-                            space = await space.tick(space.time)
-                        create_task(space.tell_stories())
-
-                            #print(
-                            #    space.id, space.pet_name, space.time, 'M', space.meadow_vegetable_growth,
-                            #    'W', space.woods_growth, 'F', space.pet_fur, 'N', space.pet_nutrition)
-                            ##    [item.type for item in await space.get_objects()])
-
-                logger.info('Simulated world at tick %d', self.time)
-
-                await sleep((self.time + 1) * TICK - datetime.now().timestamp())
-                self.time = int(datetime.now().timestamp() / TICK)
-
-        except CancelledError:
-            await cancel(events_task)
-            if inbox_task:
-                await cancel(inbox_task)
-            if outbox_task:
-                await cancel(outbox_task)
-            logger.info('Stopped bot')
-            raise
-
-        #time = int(await cast('Awaitable[str | None]', self.redis.get('time')) or '0')
-        #await self.redis.set('time', time) # type: ignore[misc]
-
-    async def perform(self, chat: str, action: str) -> str:
-        """TODO."""
-        logger = getLogger(__name__)
-
+    async def get_space_by_chat(self, chat: str) -> Space:
+        """Get the space given by *chat*."""
         space_id = await self.redis.hget('spaces_by_chat', chat)
         if not space_id:
-            space = await self.create_space(chat)
-            create_task(space.tell_stories())
-            logger.info('Created space for %s (%s)', chat, space.pet_name)
-            return '🥚 You found an egg. 😮'
+            raise KeyError(chat)
+        return await self.get_space(space_id)
 
-        space = await self.get_space(space_id)
-        tokens = self._parse(action)
-        # tokens = [self.alternatives.get(token, token) for token in tokens]
-
-        reply = await self.get_mode(chat).perform(space, *tokens)
-        create_task(space.tell_stories())
-
-        logger.info('%s (%s): %s', chat, space.pet_name, ' '.join(tokens))
-        return reply
-
-    async def get_space(self, id: str) -> Space:
-        return Space(await self.redis.hgetall(id))
+    async def get_pet(self, pet_id: str) -> Pet:
+        """Get the pet given by *pet_id*."""
+        if not pet_id.startswith('Pet:'):
+            raise ValueError(f'Bad pet_id {pet_id}')
+        data = await self.redis.hgetall(pet_id)
+        if not data:
+            raise KeyError(pet_id)
+        return Pet(data)
 
     async def get_furniture_item(self, furniture_id: str) -> Furniture:
+        """Get the furniture item given by *furniture_id*."""
+        if not furniture_id.startswith('Object:'):
+            raise ValueError(f'Bad furniture_id {furniture_id}')
         data = await self.redis.hgetall(furniture_id)
+        if not data:
+            raise KeyError(furniture_id)
         return FURNITURE_TYPES[data['type']](data)
 
+    # TODO clean
     async def create_space(self, chat: str) -> Space:
         async with self.redis.pipeline() as pipe:
             #time = await cast(Awaitable[str], pipe.get('time'))
@@ -331,57 +273,7 @@ class Bot:
 
             return Space(data)
 
-    def _parse(self, command: str) -> list[str]:
-        if not command:
-            return []
-        category = unicodedata.category(command[0])
-        if category.startswith('Z'): # space
-            return self._parse(command[1:]) # could optimize by eliminating whole run
-        if category == 'So':
-            if len(command) >= 2 and command[1] in '\ufe0e\ufe0f':
-                return [command[:2]] + self._parse(command[2:])
-            return [command[0]] + self._parse(command[1:])
-        #index = len(command)
-        #for i, c in enumerate(command):
-        #    if unicodedata.category(c) == 'So':
-        #        index = i
-        #        break
-        i = 0
-        while not (category == 'So' or category.startswith('Z')):
-            i = i + 1
-            if i >= len(command):
-                break
-            category = unicodedata.category(command[i])
-        return [command[:i]] + self._parse(command[i:])
-
-    #@staticmethod
-    #def _parse(command: str) -> list[str]:
-    #    tokens: list[str] = []
-    #    text: list[str] = []
-    #    emoji: list[str] = []
-    #    for c in command:
-    #        if emoji:
-    #            if c in '\ufe0e\ufe0f': # Emoji variation sequence
-    #                emoji.append(c)
-    #                tokens.append(''.join(emoji))
-    #                emoji = []
-    #                continue
-    #            else:
-    #                tokens.append(''.join(emoji))
-    #                emoji = []
-
-    #        print(c, ord(c))
-    #        if unicodedata.category(c) = 'So':
-    #            if text:
-    #                tokens.append(''.join(text).strip())
-    #                text = []
-    #            tokens.append(c)
-    #        else:
-    #            text.append(c)
-    #    if text:
-    #        tokens.append(''.join(text).strip())
-    #    return tokens
-
+    # TODO clean
     async def _handle_events(self) -> None:
         logger = getLogger(__name__)
         logger.info('Started event queue')
@@ -406,14 +298,106 @@ class Bot:
                     space = await self.get_space(space_id)
                     f = event_messages[event_type]
                     reply = await shield(f(space))
-                    self.send(Message(space.chat, reply))
+                    self._send(Message(space.chat, reply))
                     logger.info('%s (%s): %s', space.chat, space.pet_name, event_type)
 
         except CancelledError:
             logger.info('Stopped event queue')
             raise
 
-# clean
+    async def _handle_inbox(self, telegram: Telegram) -> None:
+        logger = getLogger(__name__)
+        logger.info('Started Telegram inbox')
+        try:
+            while True:
+                try:
+                    async for message in telegram.inbox():
+                        reply = ('⚠️ Oops, something went very wrong! We will fix the problem as '
+                                 'soon as possible. Meanwhile, you may try again.')
+                        with recovery():
+                            reply = await shield(self.perform(message.chat, message.text))
+                        self._send(Message(message.chat, reply))
+                except ClientError as e:
+                    logger.warning('Failed to receive Telegram messages (%s)', e)
+                    await sleep(1)
+        except CancelledError:
+            logger.info('Stopped Telegram inbox')
+            raise
+
+    async def _handle_outbox(self, telegram: Telegram) -> None:
+        logger = getLogger(__name__)
+        logger.info('Started Telegram outbox')
+        try:
+            while True:
+                message = await self._outbox.get()
+                try:
+                    with recovery():
+                        while True:
+                            try:
+                                await telegram.send(message)
+                                break
+                            except ClientError as e:
+                                logger.warning('Failed to send Telegram message (%s)', e)
+                                await sleep(1)
+                finally:
+                    self._outbox.task_done()
+        except CancelledError:
+            logger.info('Stopped Telegram outbox')
+            raise
+
+    def _send(self, message: Message) -> None:
+        self._outbox.put_nowait(message)
+
+    # TODO clean
+    def _parse_action(self, command: str) -> list[str]:
+        if not command:
+            return []
+        category = unicodedata.category(command[0])
+        if category.startswith('Z'): # space
+            return self._parse(command[1:]) # could optimize by eliminating whole run
+        if category == 'So':
+            if len(command) >= 2 and command[1] in '\ufe0e\ufe0f':
+                return [command[:2]] + self._parse(command[2:])
+            return [command[0]] + self._parse(command[1:])
+        #index = len(command)
+        #for i, c in enumerate(command):
+        #    if unicodedata.category(c) == 'So':
+        #        index = i
+        #        break
+        i = 0
+        while not (category == 'So' or category.startswith('Z')):
+            i = i + 1
+            if i >= len(command):
+                break
+            category = unicodedata.category(command[i])
+        return [command[:i]] + self._parse(command[i:])
+    #@staticmethod
+    #def _parse(command: str) -> list[str]:
+    #    tokens: list[str] = []
+    #    text: list[str] = []
+    #    emoji: list[str] = []
+    #    for c in command:
+    #        if emoji:
+    #            if c in '\ufe0e\ufe0f': # Emoji variation sequence
+    #                emoji.append(c)
+    #                tokens.append(''.join(emoji))
+    #                emoji = []
+    #                continue
+    #            else:
+    #                tokens.append(''.join(emoji))
+    #                emoji = []
+    #
+    #        print(c, ord(c))
+    #        if unicodedata.category(c) = 'So':
+    #            if text:
+    #                tokens.append(''.join(text).strip())
+    #                text = []
+    #            tokens.append(c)
+    #        else:
+    #            text.append(c)
+    #    if text:
+    #        tokens.append(''.join(text).strip())
+    #    return tokens
 
 @dataclass
 class Message:

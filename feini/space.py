@@ -12,7 +12,7 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.
 # If not, see <https://www.gnu.org/licenses/>.
 
-"""TODO.
+"""Logic of pets and their space.
 
 .. data:: CHARACTER_NAMES
 
@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Collection, Iterable
+from collections.abc import AsyncIterator, Awaitable, Collection
 from contextlib import asynccontextmanager
 import dataclasses
 from dataclasses import dataclass, field
@@ -35,8 +35,9 @@ from typing import Literal, cast, overload, TYPE_CHECKING
 from aioredis.exceptions import WatchError
 
 from . import context
-from .furniture import Furniture, FURNITURE_TYPES
-from .util import Pipeline, Redis, isemoji, randstr
+from .core import Entity
+from .furniture import Furniture, FURNITURE_TYPES, FURNITURE_MATERIAL
+from .util import Pipeline, Redis, randstr
 
 if TYPE_CHECKING:
     from .stories import Story
@@ -45,41 +46,94 @@ CHARACTER_NAMES = {
     '👻': 'Ghost'
 }
 
-class Space:
-    """TODO.
+class Space(Entity):
+    """Space inhabited by a pet.
 
     .. attribute:: time
 
        Current simulation time.
 
+    .. attribute:: chat
+
+       TODO.
+
+    .. attribute:: items
+
+       TODO.
+
+    .. attribute:: tools
+
+       TODO.
+
+    .. attribute:: meadow_vegetable_growth
+
+       Current vegetable growth level.
+
+    .. attribute:: woods_growth
+
+       Current wood growth level.
+
     .. attribute:: trail_supply
 
        Current hiking trail resource supply level.
 
+    .. attribute:: pet_id
+
+       ID of the residing :class:`Pet`.
+
+    .. attribute:: pet_name
+
+       Name of the pet.
+
+    .. attribute:: pet_hatched
+
+       Indicates if the pet has hatched or is still an egg.
+
     .. attribute:: pet_nutrition
 
-       Current pet nutrition level.
+       Current nutrition level of the pet.
 
-    .. data:: ITEM_CATEGORIES
+    .. attribute:: pet_fur
 
-       Available types of items by category.
+       Current fur growth level of the pet.
 
-    .. data:: ITEM_WEIGHTS
-
-       Weights by which items are ordered.
-
-    .. data:: COSTS
+    .. attribute:: pet_activity_id
 
        TODO.
 
-    .. data:: BLUEPRINT_WEIGHTS
-
-       Weights by which blueprints are ordered.
-
-    .. data:: TRAIL_SUPPLY_FULL
+       TODO all static numbers
+    .. attribute:: TRAIL_SUPPLY_FULL
 
        Level at which a resource is in supply on the trail.
+
+    .. attribute:: ITEM_CATEGORIES
+
+       Available types of items by category.
+
+    .. attribute:: ITEM_WEIGHTS
+
+       Weights by which items are ordered.
+
+    .. attribute:: TOOL_MATERIAL
+
+       Material needed for each tool.
+
+    .. attribute:: CLOTHING_MATERIAL
+
+       Material needed for each clothing item.
+
+    .. attribute:: BLUEPRINT_WEIGHTS
+
+       Weights by which blueprints are ordered.
     """
+
+    # TODO clean
+    INTERVAL_S = 7
+    MEADOW_VEGETABLE_GROWTH_MAX = 7
+    WOODS_GROWTH_MAX = 7
+    TRAIL_SUPPLY_FULL = 23
+    PET_NUTRITION_MAX = 25
+    PET_FUR_MAX = 7
 
     ITEM_CATEGORIES = {
         'resource': ['🥕', '🪨', '🪵', '🧶'],
@@ -96,27 +150,13 @@ class Space:
     # Material distribution guidelines: 4 - 5 resources for small (S) objects, 6 - 7 for M and 8 - 9
     # for L (for details see ``scripts/material.py``)
 
-    COSTS = {
-        # Tools
+    TOOL_MATERIAL = {
         '🪓': ['🪨'], # S
         '✂️': ['🪨', '🪨', '🪨', '🪵'], # S
         '🪡': ['🪵', '🪵', '🪵', '🪵', '🪵'], # S
         '🍳': ['🪨', '🪨', '🪨', '🪨', '🪵'], # S
         '🚿': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
         '🧭': ['🪨', '🪨', '🪨', '🪨'], # S
-        # Toys
-        '🪃': ['🪵', '🪵'], # S
-        '⚾': ['🪵', '🪵', '🧶', '🧶', '🧶'], # S
-        '🧸': ['🪨', '🧶', '🧶', '🧶', '🧶'], # S
-        # Furniture
-        '🛋️': ['🪨', '🪵', '🪵', '🪵', '🪵', '🧶', '🧶', '🧶', '🧶'], # L
-        '🪴': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵', '🪵'], # M
-        '⛲': ['🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨', '🪨'], # L
-        # Devices
-        '📺': ['🪨', '🪨', '🪵', '🪵', '🪵', '🪵'], # M
-        # Miscellaneous
-        '🗞️': ['🪵', '🪵', '🪵',  '🧶'], # S
-        '🎨': ['🪵', '🪵', '🪵', '🪵', '🪨', '🧶', '🧶'] # M
     }
 
     CLOTHING_MATERIAL = {
@@ -134,41 +174,37 @@ class Space:
         '💍': ['🪨', '🪨', '🪨', '🪨', '🧶'] # S
     }
 
-    BLUEPRINT_WEIGHTS = {blueprint: weight for weight, blueprint in enumerate(COSTS)}
-
-    INTERVAL_S = 7
-    MEADOW_VEGETABLE_GROWTH_MAX = 7
-    WOODS_GROWTH_MAX = 7
-    TRAIL_SUPPLY_FULL = 23
-    PET_NUTRITION_MAX = 25
-    PET_FUR_MAX = 7
+    BLUEPRINT_WEIGHTS = {
+        blueprint: weight
+        for weight, blueprint in enumerate(chain(TOOL_MATERIAL, FURNITURE_MATERIAL))
+    }
 
     def __init__(self, data: dict[str, str]) -> None:
-        self.id = data['id']
+        super().__init__(data)
         self.chat = data['chat']
         self.time = int(data['time'])
-        self.resources = data['resources'].split()
+        self.items = data['resources'].split()
         self.tools = data['tools'].split()
         self.meadow_vegetable_growth = int(data['meadow_vegetable_growth'])
         self.woods_growth = int(data['woods_growth'])
         self.trail_supply = int(data['trail_supply'])
         self.pet_id = data['pet_id']
         self.pet_name = data['pet_name']
-        self.pet_is_egg = bool(data['pet_is_egg'])
+        self.pet_hatched = bool(data['pet_is_egg'])
         self.pet_nutrition = int(data['pet_nutrition'])
         self.pet_fur = int(data['pet_fur'])
         self.pet_activity_id = data['pet_activity_id']
 
     async def get_pet(self) -> Pet:
-        return Pet(await context.bot.get().redis.hgetall(self.pet_id))
+        """Get the residing pet."""
+        return await context.bot.get().get_pet(self.pet_id)
 
-    async def get(self) -> Space:
-        return await context.bot.get().get_space(self.id)
-
+    # TODO clean
     async def get_blueprints(self) -> list[str]:
         """Get known blueprints."""
         return await context.bot.get().redis.zrange(f'{self.id}.blueprints', 0, -1)
 
+    # TODO clean
     async def get_objects(self) -> list[Furniture]:
         bot = context.bot.get()
         key = f'{self.id}.items'
@@ -288,15 +324,15 @@ class Space:
 
     async def gather_meadow(self) -> list[str]:
         async with transaction(context.bot.get().redis, self.id) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split()
+            items = (await pipe.hget(self.id, 'resources') or '').split()
             growth = int(await pipe.hget(self.id, 'meadow_vegetable_growth') or '')
             pipe.multi()
             gathered = []
             if growth == self.MEADOW_VEGETABLE_GROWTH_MAX:
                 gathered = ['🥕', '🪨']
-                resources = sorted(resources + gathered, key=Space.ITEM_WEIGHTS.__getitem__)
+                items = sorted(items + gathered, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id,
-                          mapping={'resources': ' '.join(resources), 'meadow_vegetable_growth': 0})
+                          mapping={'resources': ' '.join(items), 'meadow_vegetable_growth': 0})
             await pipe.execute()
             return gathered
 
@@ -310,8 +346,8 @@ class Space:
             wood = []
             if space.woods_growth == self.WOODS_GROWTH_MAX:
                 wood = ['🪵']
-                resources = sorted(space.resources + wood, key=Space.ITEM_WEIGHTS.__getitem__)
-                pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'woods_growth': 0})
+                items = sorted(space.items + wood, key=Space.ITEM_WEIGHTS.__getitem__)
+                pipe.hset(self.id, mapping={'resources': ' '.join(items), 'woods_growth': 0})
             await pipe.execute()
             return wood
 
@@ -335,8 +371,8 @@ class Space:
             wool = []
             if space.pet_fur == self.PET_FUR_MAX:
                 wool = ['🧶']
-                resources = sorted(space.resources + wool, key=Space.ITEM_WEIGHTS.__getitem__)
-                pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'pet_fur': 0})
+                items = sorted(space.items + wool, key=Space.ITEM_WEIGHTS.__getitem__)
+                pipe.hset(self.id, mapping={'resources': ' '.join(items), 'pet_fur': 0})
             await pipe.execute()
             return wool
 
@@ -358,10 +394,10 @@ class Space:
                 raise ValueError(f'Unknown blueprint {blueprint}')
             pipe.multi()
             try:
-                for resource in self.COSTS[blueprint]:
+                for resource in self.TOOL_MATERIAL[blueprint]:
                     items.remove(resource)
             except ValueError:
-                raise ValueError('Missing resources') from None
+                raise ValueError('Missing items') from None
             tools.append(blueprint)
             pipe.hset(self.id, mapping={'resources': ' '.join(items), 'tools': ' '.join(tools)})
             await pipe.execute()
@@ -378,10 +414,10 @@ class Space:
                 raise ValueError(f'Unknown blueprint {blueprint}')
             pipe.multi()
             try:
-                for resource in self.COSTS[blueprint]:
+                for resource in FURNITURE_MATERIAL[blueprint]:
                     items.remove(resource)
             except ValueError:
-                raise ValueError('Missing resources') from None
+                raise ValueError('Missing items') from None
             pipe.hset(self.id, 'resources', ' '.join(items))
             pipe.rpush(f'{self.id}.items', object_id)
             await pipe.execute()
@@ -409,7 +445,7 @@ class Space:
                 for item in material:
                     items.remove(item)
             except ValueError:
-                raise ValueError('Missing resources') from None
+                raise ValueError('Missing items') from None
             items.append(pattern)
             items.sort(key=Space.ITEM_WEIGHTS.__getitem__)
             pipe.hset(self.id, 'resources', ' '.join(items))
@@ -423,16 +459,16 @@ class Space:
 
     async def feed_pet(self) -> None:
         async with transaction(context.bot.get().redis, self.id) as pipe:
-            resources = (await pipe.hget(self.id, 'resources') or '').split()
+            items = (await pipe.hget(self.id, 'resources') or '').split()
             nutrition = int(await pipe.hget(self.id, 'pet_nutrition') or '')
             pipe.multi()
             if nutrition == self.PET_NUTRITION_MAX:
                 raise ValueError('Max pet_nutrition')
             try:
-                resources.remove('🥕')
+                items.remove('🥕')
             except ValueError as e:
-                raise ValueError('🥕 not in resources') from e
-            pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'pet_nutrition': 25})
+                raise ValueError('🥕 not in items') from e
+            pipe.hset(self.id, mapping={'resources': ' '.join(items), 'pet_nutrition': 25})
             await pipe.execute()
 
     async def change_pet_name(self, name: str) -> Space:
@@ -473,8 +509,8 @@ class Space:
             if hike.gathered:
                 if space.trail_supply < self.TRAIL_SUPPLY_FULL:
                     raise ValueError('Empty trail_supply')
-                resources = sorted(space.resources + hike.gathered, key=Space.ITEM_WEIGHTS.__getitem__)
-                pipe.hset(self.id, mapping={'resources': ' '.join(resources), 'trail_supply': 0})
+                items = sorted(space.items + hike.gathered, key=Space.ITEM_WEIGHTS.__getitem__)
+                pipe.hset(self.id, mapping={'resources': ' '.join(items), 'trail_supply': 0})
             await pipe.execute()
 
     async def tell_stories(self) -> None:
@@ -494,7 +530,7 @@ class Space:
 
     # wash_pet() pet_hygiene dirty
 
-class Pet:
+class Pet(Entity):
     """Pet.
 
     .. attribute:: clothing
@@ -505,7 +541,7 @@ class Pet:
     MAX_DIRT = 48 + 1
 
     def __init__(self, data: dict[str, str]) -> None:
-        self.id = data['id']
+        super().__init__(data)
         self.space_id = data['space_id']
         self.dirt = int(data['dirt'])
         self.clothing = data['clothing'] or None

@@ -65,7 +65,7 @@ class FeiniTestCase(IsolatedAsyncioTestCase):
             #await space.tick(space.time)
 
 class BotTest(FeiniTestCase):
-    async def test_get_set_mode(self) -> None:
+    async def test_set_mode(self) -> None:
         mode_in = HikeMode(Hike(self.space))
         self.bot.set_mode(self.space.chat, mode_in)
         mode_out = self.bot.get_mode(self.space.chat)
@@ -73,7 +73,11 @@ class BotTest(FeiniTestCase):
 
     async def test_create_space(self) -> None:
         space = await self.bot.create_space('local')
-        blueprints = await space.get_blueprints()
-        self.assertTrue(blueprints)
+        pet = await space.get_pet()
+        self.assertEqual(await self.bot.get_spaces(), {space}) # type: ignore[misc]
+        self.assertEqual(await self.bot.get_space(space.id), space)
+        self.assertEqual(await self.bot.get_space_by_chat(space.chat), space)
+        self.assertEqual(pet.space_id, space.id)
+        self.assertTrue(await space.get_blueprints())
 
 # /clean
