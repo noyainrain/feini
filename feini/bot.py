@@ -21,6 +21,7 @@ from asyncio import CancelledError, Queue, create_task, shield, sleep
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
+from inspect import getmembers
 import json
 from json import JSONDecodeError
 from inspect import iscoroutinefunction, signature
@@ -33,7 +34,7 @@ from aiohttp import ClientError, ClientPayloadError, ClientSession, ClientTimeou
 import aioredis.client
 
 from . import actions, context, updates
-from .actions import MainMode, Mode
+from .actions import EventMessageFunc, MainMode, Mode
 from .furniture import Furniture, FURNITURE_TYPES
 from .space import Pet, Space
 from .util import JSONObject, Redis, cancel, raise_for_status, randstr, recovery
@@ -277,34 +278,24 @@ class Bot:
             await pipe.execute()
             return Space(space)
 
-    # TODO clean
     async def _handle_events(self) -> None:
+        def iseventmessagefunc(obj: object) -> bool:
+            return isinstance(obj, EventMessageFunc)
+        members = cast(list[tuple[str, EventMessageFunc]],
+                       getmembers(actions, iseventmessagefunc))
+        event_messages = {f.event_type: f for _, f in members}
+
         logger = getLogger(__name__)
         logger.info('Started event queue')
-
         try:
-            #event_messages = {}
-            #for event_message in cast(dict[str, object], vars(actions)).values():
-            #    if isinstance(event_message, actions.EventMessageFunc):
-            #        event_messages[event_message.event_type] = event_message
-            members = cast(dict[str, object], vars(actions)).values()
-            event_messages = {
-                member.event_type:
-                    member for member in members if isinstance(member, actions.EventMessageFunc)
-            }
-
-            # self._event_handlers: dict[str, Callable[[Space], Awaitable[str]]] = {}
-
             while True:
                 _, event = await self.redis.blpop('events')
+                event_type, space_id = event.split()
                 with recovery():
-                    event_type, space_id = event.split()
-                    space = await self.get_space(space_id)
-                    f = event_messages[event_type]
-                    reply = await shield(f(space))
+                    space = await shield(self.get_space(space_id))
+                    reply = await shield(event_messages[event_type](space))
                     self._send(Message(space.chat, reply))
                     logger.info('%s (%s): %s', space.chat, space.pet_name, event_type)
-
         except CancelledError:
             logger.info('Stopped event queue')
             raise
@@ -353,28 +344,51 @@ class Bot:
         self._outbox.put_nowait(message)
 
     # TODO clean
-    def _parse_action(self, command: str) -> list[str]:
-        if not command:
+    def _parse_action(self, action: str) -> list[str]:
+        if not action:
             return []
-        category = unicodedata.category(command[0])
-        if category.startswith('Z'): # space
-            return self._parse(command[1:]) # could optimize by eliminating whole run
+
+        category = unicodedata.category(action[0])
+
+        # Parse space
+        if category.startswith('Z'):
+            return self._parse_action(action[1:])
+
+        # Parse emoji
         if category == 'So':
-            if len(command) >= 2 and command[1] in '\ufe0e\ufe0f':
-                return [command[:2]] + self._parse(command[2:])
-            return [command[0]] + self._parse(command[1:])
-        #index = len(command)
-        #for i, c in enumerate(command):
+            # if len(action) >= 2 and action[1] in '\ufe0e\ufe0f':
+            # return [action[:2]] + self._parse_action(action[2:])
+            # return [action[:1]] + self._parse_action(action[1:])
+            # if len(action) >= 2 and action[1] in '\N{VARIATION SELECTOR-15}\N{VARIATION SELECTOR-16}':
+            variation_selectors = '\N{VARIATION SELECTOR-15}\N{VARIATION SELECTOR-16}'
+            length = 2 if len(action) >= 2 and action[1] in variation_selectors else 1
+            return [action[:length]] + self._parse_action(action[length:])
+
+        # Parse word
+        from itertools import takewhile
+        def isword(character: str) -> bool:
+            category = unicodedata.category(character)
+            return not (category.startswith('Z') or category == 'So')
+        word = str(takewhile(isword, action))
+        return [word] + self._parse_action(action[len(word):])
+
+        #i = 0
+        #while not (category == 'So' or category.startswith('Z')):
+        #    i += 1
+        #    if i >= len(action):
+        #        break
+        #    category = unicodedata.category(action[i])
+        #return [action[:i]] + self._parse_action(action[i:])
+
+        #i = next(i for i, character in action if not (category.startswith('Z') or category == 'So'))
+        #return [action[:i]] + self._parse_action(action[i:])
+
+        #index = len(action)
+        #for i, c in enumerate(action):
         #    if unicodedata.category(c) == 'So':
         #        index = i
         #        break
-        i = 0
-        while not (category == 'So' or category.startswith('Z')):
-            i = i + 1
-            if i >= len(command):
-                break
-            category = unicodedata.category(command[i])
-        return [command[:i]] + self._parse(command[i:])
+
     #@staticmethod
     #def _parse(command: str) -> list[str]:
     #    tokens: list[str] = []

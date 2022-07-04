@@ -91,7 +91,7 @@ class Mode:
             def isaction(obj: object) -> bool:
                 return isinstance(obj, Action)
             members = cast(list[tuple[str, Action[Mode]]], getmembers(cls, isaction))
-            cls._actions = {member.name: member for _, member in members}
+            cls._actions = {action.name: action for _, action in members}
 
     async def perform(self, space: Space, *args: str) -> str:
         """Perform the action given by the arguments *args* in *space*.
@@ -120,7 +120,7 @@ def item_action(item: str) -> Callable[[_ActionCallable[MainMode]], Action[MainM
     """
     def decorator(func: _ActionCallable[MainMode]) -> Action[MainMode]:
         async def wrapper(self: MainMode, space: Space, *args: str) -> str:
-            if not (item in space.resources or item in space.tools):
+            if not (item in space.items or item in space.tools):
                 return await self.default(space, *args)
             return await func(self, space, *args)
         return Action(wrapper, name=item)
