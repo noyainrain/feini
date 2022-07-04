@@ -89,7 +89,7 @@ async def update_space_trail_supply() -> None:
     for space_id in await bot.redis.hvals('spaces_by_chat'):
         if not await bot.redis.hexists(space_id, 'trail_supply'):
             async with bot.redis.pipeline() as pipe:
-                pipe.hset(space_id, 'trail_supply', Space.TRAIL_SUPPLY_FULL)
+                pipe.hset(space_id, 'trail_supply', Space.TRAIL_SUPPLY_MAX)
                 pipe.rpush('events', f'space-stroll-compass-blueprint {space_id}')
                 await pipe.execute()
                 updates += 1

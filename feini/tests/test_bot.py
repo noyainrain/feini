@@ -23,7 +23,8 @@ from feini.space import Hike, Space
 
 class FeiniTestCase(IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        self.bot = Bot(debug=True)
+        self.bot = Bot(redis_url='redis:15', debug=True)
+        await self.bot.redis.flushdb()
         context.bot.set(self.bot)
         self.space = await self.bot.create_space('local')
 
@@ -72,12 +73,14 @@ class BotTest(FeiniTestCase):
         self.assertIs(mode_out, mode_in)
 
     async def test_create_space(self) -> None:
-        space = await self.bot.create_space('local')
-        pet = await space.get_pet()
-        self.assertEqual(await self.bot.get_spaces(), {space}) # type: ignore[misc]
+        space = await self.bot.create_space('chat')
+        self.assertEqual(space.chat, 'chat')
+        self.assertIn(space, await self.bot.get_spaces())
         self.assertEqual(await self.bot.get_space(space.id), space)
         self.assertEqual(await self.bot.get_space_by_chat(space.chat), space)
+        pet = await space.get_pet()
         self.assertEqual(pet.space_id, space.id)
         self.assertTrue(await space.get_blueprints())
+        self.assertTrue(await space.get_stories())
 
 # /clean

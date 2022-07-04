@@ -175,7 +175,6 @@ _EMOJI_VARIANTS = {
 _EMOJI_NORMAL_FORMS = {
     variant: emoji for emoji, variants in _EMOJI_VARIANTS.items() for variant in variants
 }
-print('VARIANTS', _EMOJI_NORMAL_FORMS)
 
 def normalize_emoji(emoji: str) -> str:
     """TODO. emoji variations, multiple emojis expressing the same concept and text alias.
@@ -456,7 +455,7 @@ class MainMode(Mode):
         if space.pet_nutrition == 0:
             return pet_message(pet, f'{space.pet_name} looks hungry.', focus='🍽️')
         pet = await space.get_pet()
-        if pet.dirt == pet.MAX_DIRT:
+        if pet.dirt == pet.DIRT_MAX:
             return pet_message(pet, f'{space.pet_name} is pretty dirty.', focus='💩')
         activity = await space.get_pet_activity()
         if activity == '':

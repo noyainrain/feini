@@ -214,42 +214,48 @@ class Bot:
             raise KeyError(furniture_id)
         return FURNITURE_TYPES[data['type']](data)
 
-    # TODO clean
     async def create_space(self, chat: str) -> Space:
+        """Create a new space for the given *chat*."""
         async with self.redis.pipeline() as pipe:
-            #time = await cast(Awaitable[str], pipe.get('time'))
+            await pipe.watch('spaces_by_chat')
+            if await pipe.hexists('spaces_by_chat', chat):
+                raise ValueError(f'Duplicate chat {chat}')
+
+            pipe.multi()
             space_id = f'Space:{randstr()}'
             pet_id = f'Pet:{randstr()}'
-            data = {
+
+            space = {
                 'id': space_id,
                 'chat': chat,
                 'time': str(self.time),
                 'resources': '',
-                # in reverse order: care, gather, craft, other
-                'tools': '👋 ✏️ 🔨 🧺 🧽',
+                'tools': ' '.join(['👋', '✏️', '🔨', '🧺', '🧽']),
                 'meadow_vegetable_growth': str(Space.MEADOW_VEGETABLE_GROWTH_MAX),
                 'woods_growth': str(Space.WOODS_GROWTH_MAX),
-                'trail_supply': str(Space.TRAIL_SUPPLY_FULL),
+                'trail_supply': str(Space.TRAIL_SUPPLY_MAX),
                 'pet_id': pet_id,
                 'pet_name': 'Feini',
                 'pet_is_egg': 'true',
-                'pet_nutrition': str(Space.INTERVAL_S),
+                'pet_nutrition': str(8 - 1),
                 'pet_fur': '0',
                 'pet_activity_id': ''
             }
-            pet_data = {
+            pipe.hset(space_id, mapping=space)
+            pipe.hset('spaces_by_chat', chat, space_id)
+
+            pet = {
                 'id': pet_id,
                 'space_id': space_id,
-                'dirt': str(Pet.MAX_DIRT - Space.INTERVAL_S),
+                'dirt': str(Pet.DIRT_MAX - (8 - 1)),
                 'clothing': ''
             }
+            pipe.hset(pet_id, mapping=pet)
 
-            pipe.hset(space_id, mapping=data)
-            blueprints = [
-                '🪓', '✂️', '🍳', '🚿', '🧭', '🪃', '⚾', '🧸', '🛋️', '🪴', '⛲', '📺', '🗞️', '🎨']
+            blueprints = ['🪓', '✂️', '🍳', '🚿', '🧭', '🪃', '⚾', '🧸', '🛋️', '🪴', '⛲', '📺', '🗞️',
+                          '🎨']
             pipe.zadd(f'{space_id}.blueprints',
                       {blueprint: Space.BLUEPRINT_WEIGHTS[blueprint] for blueprint in blueprints})
-            pipe.hset(pet_id, mapping=pet_data)
 
             stories = [
                 {
@@ -268,10 +274,8 @@ class Bot:
                 pipe.hset(story['id'], mapping=story)
                 pipe.sadd(f'{space_id}.stories', story['id'])
 
-            pipe.hset('spaces_by_chat', chat, data['id'])
             await pipe.execute()
-
-            return Space(data)
+            return Space(space)
 
     # TODO clean
     async def _handle_events(self) -> None:

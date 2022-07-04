@@ -20,7 +20,7 @@ from itertools import cycle, islice
 
 from feini.context import bot
 from feini.furniture import Houseplant, FURNITURE_MATERIAL
-from feini.space import Hike, Space
+from feini.space import Hike, Pet, Space
 from .test_bot import FeiniTestCase
 
 #class FeiniTestCase(IsolatedAsyncioTestCase):
@@ -33,7 +33,7 @@ class SpaceTest(FeiniTestCase):
     async def test_tick(self) -> None:
         await self.space.tick(self.space.time)
         space = await self.space.get()
-        self.assertEqual(space.trail_supply, Space.TRAIL_SUPPLY_FULL + 1)
+        self.assertEqual(space.trail_supply, Space.TRAIL_SUPPLY_MAX + 1)
 
         for _ in range(1000):
             if space.pet_activity_id != '':
@@ -56,7 +56,7 @@ class SpaceTest(FeiniTestCase):
         await self.space.feed_pet()
         space = await bot.get().get_space(self.space.id)
         self.assertEqual(space.items, ['🪨']) # type: ignore[misc]
-        self.assertEqual(space.pet_nutrition, space.PET_NUTRITION_MAX)
+        self.assertEqual(space.pet_nutrition, Pet.NUTRITION_MAX)
 
     async def test_feed_pet_no_vegetable(self) -> None:
         with self.assertRaisesRegex(ValueError, 'items'):
@@ -95,7 +95,7 @@ class SpaceTest(FeiniTestCase):
 
     async def test_use_scissors(self) -> None:
         await self.space.obtain('✂️')
-        for tick in range(Space.PET_FUR_MAX):
+        for tick in range(Pet.FUR_MAX):
             await self.space.tick(tick)
         wool = await self.space.use('✂️')
         space = await self.space.get()

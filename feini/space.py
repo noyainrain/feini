@@ -101,8 +101,15 @@ class Space(Entity):
 
        TODO.
 
-       TODO all static numbers
-    .. attribute:: TRAIL_SUPPLY_FULL
+    .. attribute:: MEADOW_VEGETABLE_GROWTH_MAX
+
+       Level at which a vegetable is fully grown.
+
+    .. attribute:: WOODS_GROWTH_MAX
+
+       Level at which wood is fully grown.
+
+    .. attribute:: TRAIL_SUPPLY_MAX
 
        Level at which a resource is in supply on the trail.
 
@@ -127,13 +134,9 @@ class Space(Entity):
        Weights by which blueprints are ordered.
     """
 
-    # TODO clean
-    INTERVAL_S = 7
-    MEADOW_VEGETABLE_GROWTH_MAX = 7
-    WOODS_GROWTH_MAX = 7
-    TRAIL_SUPPLY_FULL = 23
-    PET_NUTRITION_MAX = 25
-    PET_FUR_MAX = 7
+    MEADOW_VEGETABLE_GROWTH_MAX = 8 - 1
+    WOODS_GROWTH_MAX = 8 - 1
+    TRAIL_SUPPLY_MAX = 24 - 1
 
     ITEM_CATEGORIES = {
         'resource': ['🥕', '🪨', '🪵', '🧶'],
@@ -274,7 +277,7 @@ class Space(Entity):
                         min(space.meadow_vegetable_growth + 1, self.MEADOW_VEGETABLE_GROWTH_MAX),
                     'woods_growth': min(space.woods_growth + 1, self.WOODS_GROWTH_MAX),
                     'pet_nutrition': pet_nutrition,
-                    'pet_fur': min(space.pet_fur + 1, self.PET_FUR_MAX),
+                    'pet_fur': min(space.pet_fur + 1, Pet.FUR_MAX),
                     'pet_activity_id': pet_activity_id
                 })
                 pipe.hincrby(self.id, 'trail_supply', 1)
@@ -369,7 +372,7 @@ class Space(Entity):
                 raise ValueError('Scissors not in tools')
             pipe.multi()
             wool = []
-            if space.pet_fur == self.PET_FUR_MAX:
+            if space.pet_fur == Pet.FUR_MAX:
                 wool = ['🧶']
                 items = sorted(space.items + wool, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id, mapping={'resources': ' '.join(items), 'pet_fur': 0})
@@ -462,7 +465,7 @@ class Space(Entity):
             items = (await pipe.hget(self.id, 'resources') or '').split()
             nutrition = int(await pipe.hget(self.id, 'pet_nutrition') or '')
             pipe.multi()
-            if nutrition == self.PET_NUTRITION_MAX:
+            if nutrition == Pet.NUTRITION_MAX:
                 raise ValueError('Max pet_nutrition')
             try:
                 items.remove('🥕')
@@ -488,7 +491,7 @@ class Space(Entity):
         space = Space(await context.bot.get().redis.hgetall(self.id))
         if '🧭' not in space.tools:
             raise ValueError('No tools item 🧭')
-        resource = (random.choice(['🥕', '🪨']) if space.trail_supply >= self.TRAIL_SUPPLY_FULL
+        resource = (random.choice(['🥕', '🪨']) if space.trail_supply >= self.TRAIL_SUPPLY_MAX
                     else None)
         return Hike(self, resource=resource)
 
@@ -507,7 +510,7 @@ class Space(Entity):
             if '🧭' not in space.tools:
                 raise ValueError('No tools item 🧭')
             if hike.gathered:
-                if space.trail_supply < self.TRAIL_SUPPLY_FULL:
+                if space.trail_supply < self.TRAIL_SUPPLY_MAX:
                     raise ValueError('Empty trail_supply')
                 items = sorted(space.items + hike.gathered, key=Space.ITEM_WEIGHTS.__getitem__)
                 pipe.hset(self.id, mapping={'resources': ' '.join(items), 'trail_supply': 0})
@@ -533,12 +536,30 @@ class Space(Entity):
 class Pet(Entity):
     """Pet.
 
+    .. attribute:: dirt
+
+       Current dirtiness level.
+
     .. attribute:: clothing
 
        Clothing the pet is wearing.
+
+    .. attribute:: NUTRITION_MAX
+
+       Level at which the pet is completely full.
+
+    .. attribute:: DIRT_MAX
+
+       Level at which the pet is completely dirty.
+
+    .. attribute:: FUR_MAX
+
+       Level at which the fur is fully grown.
     """
 
-    MAX_DIRT = 48 + 1
+    NUTRITION_MAX = 24 + 1
+    DIRT_MAX = 48 + 1
+    FUR_MAX = 8 - 1
 
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
@@ -551,8 +572,8 @@ class Pet(Entity):
             await pipe.watch(self.id)
             pet = Pet(await pipe.hgetall(self.id))
             pipe.multi()
-            pipe.hset(self.id, 'dirt', min(pet.dirt + 1, self.MAX_DIRT))
-            if pet.dirt == self.MAX_DIRT - 1:
+            pipe.hset(self.id, 'dirt', min(pet.dirt + 1, self.DIRT_MAX))
+            if pet.dirt == self.DIRT_MAX - 1:
                 pipe.rpush('events', f'pet-dirty {self.space_id}')
             await pipe.execute()
 

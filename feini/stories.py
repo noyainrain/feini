@@ -16,7 +16,7 @@
 
 from . import context
 from .core import Entity
-from .space import Message, Space
+from .space import Pet, Message, Space
 from .util import randstr
 
 class Story(Entity):
@@ -76,7 +76,7 @@ class IntroStory(Story):
             elif chapter == 'gather' and '🥕' in items:
                 pipe.hset(self.id, mapping={'chapter': 'feed', 'update_time': bot.time})
                 pipe.rpush('events', f'space-explain-feed {self.space_id}')
-            elif chapter == 'feed' and nutrition >= Space.PET_NUTRITION_MAX:
+            elif chapter == 'feed' and nutrition >= Pet.NUTRITION_MAX:
                 pipe.hset(self.id, mapping={'chapter': 'craft', 'update_time': bot.time})
                 pipe.rpush('events', f'space-explain-craft {self.space_id}')
             elif chapter == 'craft' and '🪓' in tools:
