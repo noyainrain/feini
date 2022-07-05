@@ -24,23 +24,25 @@ class IntroStoryTest(TestCase):
                           if isinstance(story, IntroStory))
 
     async def test_tell(self) -> None:
+        pet = await self.space.get_pet()
+
         self.bot.time += 1
         await self.story.tell()
         story = await self.story.get()
         self.assertEqual(story.chapter, 'touch')
         self.assertEqual(story.update_time, 1)
 
-        await self.space.touch_pet()
+        await pet.touch()
         await story.tell()
         story = await story.get()
         self.assertEqual(story.chapter, 'gather')
 
-        await self.space.gather_meadow()
+        await self.space.gather()
         await story.tell()
         story = await story.get()
         self.assertEqual(story.chapter, 'feed')
 
-        await self.space.feed_pet()
+        await pet.feed()
         await story.tell()
         story = await story.get()
         self.assertEqual(story.chapter, 'craft')

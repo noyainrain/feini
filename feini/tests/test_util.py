@@ -73,10 +73,10 @@ class RaiseForStatusTest(AioHTTPTestCase):
 
 class JSONObjectTest(TestCase):
     def setUp(self) -> None:
-        self.cat = JSONObject(name='Happy Cat')
+        self.cat = JSONObject(name='Frank')
 
     def test_get(self) -> None:
-        self.assertEqual(self.cat.get('name', cls=str), 'Happy Cat')
+        self.assertEqual(self.cat.get('name', cls=str), 'Frank')
 
     def test_get_bad_item_type(self) -> None:
         with self.assertRaisesRegex(TypeError, 'name'):

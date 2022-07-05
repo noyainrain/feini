@@ -260,7 +260,7 @@ class MainMode(Mode):
 
     @item_action('🧺')
     async def gather_meadow(self, space: Space, *args: str) -> str:
-        resources = await space.gather_meadow()
+        resources = await space.gather()
         if resources:
             return f"🧺 You gathered {''.join(resources)} from the meadow. 😊"
         return '🧺 The meadow is empty. Maybe try again later?'
@@ -452,8 +452,8 @@ class MainMode(Mode):
     @item_action('👋')
     async def touch(self, space: Space, *args: str) -> str:
         pet = await space.get_pet()
-        await space.touch_pet()
-        if space.pet_hatched:
+        await pet.touch()
+        if not space.pet_hatched:
             return f'🥚 Crack! 🐕 {space.pet_name} hatched from the egg. It looks around curiously. 😊'
         if space.pet_nutrition == 0:
             return pet_message(pet, f'{space.pet_name} looks hungry.', focus='🍽️')
@@ -472,7 +472,7 @@ class MainMode(Mode):
     async def feed_pet(self, space: Space, *args: str) -> str:
         pet = await space.get_pet()
         try:
-            await space.feed_pet()
+            await pet.feed()
             return pet_message(pet, f'{space.pet_name} enjoys its veggies.', focus='🥕', mood='😊')
         except ValueError as e:
             #if 'resources' in str(e):
@@ -493,7 +493,8 @@ class MainMode(Mode):
 
     @item_action('✂️')
     async def shear_pet(self, space: Space, *args: str) -> str:
-        wool = await space.use('✂️')
+        pet = await space.get_pet()
+        wool = await pet.shear()
         if wool:
             return f"✂️ You gently cut {''.join(wool)} from {space.pet_name}. 😊"
         return f'✂️ {space.pet_name} seems reluctant. Maybe try again later?'
@@ -506,7 +507,7 @@ class MainMode(Mode):
                 Change the name of {space.pet_name}.
             """)
         pet = await space.get_pet()
-        await space.change_pet_name(args[1])
+        await pet.change_name(args[1])
         space = await space.get()
         return random.choice([
             pet_message(pet, f'{space.pet_name} looks happy with its new name.', focus='✏️', mood='😊'),

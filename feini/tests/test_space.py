@@ -27,17 +27,13 @@ from .test_bot import TestCase
 
 class SpaceTest(TestCase):
     async def test_tick(self) -> None:
-        await self.space.tick(self.space.time)
+        await self.space.tick(0)
         space = await self.space.get()
+        self.assertEqual(space.time, 1)
+        self.assertEqual(space.meadow_vegetable_growth, Space.MEADOW_VEGETABLE_GROWTH_MAX + 1)
+        self.assertEqual(space.woods_growth, Space.WOODS_GROWTH_MAX + 1)
         self.assertEqual(space.trail_supply, Space.TRAIL_SUPPLY_MAX + 1)
-
-        for _ in range(1000):
-            if space.pet_activity_id != '':
-                break
-            await space.tick(space.time)
-            space = await space.get()
-        else:
-            self.fail()
+        self.assertEqual(space.pet_nutrition, (8 - 1) - 1)
 
     async def test_obtain(self) -> None:
         await self.space.obtain('🪵', '🧶', '🥕')
@@ -45,64 +41,31 @@ class SpaceTest(TestCase):
         space = await self.space.get()
         self.assertEqual(space.items, ['🥕', '🪵', '🪵', '🧶']) # type: ignore[misc]
 
-    # /clean
-
-    async def test_feed_pet(self) -> None:
-        await self.space.gather_meadow()
-        await self.space.feed_pet()
-        space = await bot.get().get_space(self.space.id)
-        self.assertEqual(space.items, ['🪨']) # type: ignore[misc]
-        self.assertEqual(space.pet_nutrition, Pet.NUTRITION_MAX)
-
-    async def test_feed_pet_no_vegetable(self) -> None:
-        with self.assertRaisesRegex(ValueError, 'items'):
-            await self.space.feed_pet()
-
-    async def test_feed_pet_full(self) -> None:
-        await self.space.gather_meadow()
-        await self.space.feed_pet()
-        with self.assertRaisesRegex(ValueError, 'pet_nutrition'):
-            await self.space.feed_pet()
-
-    async def test_gather_meadow(self) -> None:
-        resources = await self.space.gather_meadow()
-        space = await bot.get().get_space(self.space.id)
+    async def test_gather(self) -> None:
+        resources = await self.space.gather()
+        space = await self.space.get()
         self.assertEqual(resources, ['🥕', '🪨']) # type: ignore[misc]
         self.assertEqual(space.items, resources)
         self.assertEqual(space.meadow_vegetable_growth, 0)
 
-    async def test_gather_meadow_empty(self) -> None:
-        await self.space.gather_meadow()
-        resources = await self.space.gather_meadow()
+    async def test_gather_immature_vegetable(self) -> None:
+        await self.space.gather()
+        resources = await self.space.gather()
         self.assertFalse(resources)
 
     async def test_chop_wood(self) -> None:
-        await self.space.obtain(*Space.TOOL_MATERIAL['🪓'])
-        await self.space.craft('🪓')
+        await self.space.obtain('🪓', '🥕')
         wood = await self.space.chop_wood()
-        space = await self.bot.get_space(self.space.id)
+        space = await self.space.get()
         self.assertEqual(wood, ['🪵']) # type: ignore[misc]
-        self.assertEqual(space.items, ['🪵']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🥕', '🪵']) # type: ignore[misc]
         self.assertEqual(space.woods_growth, 0)
 
-    # test_chop_woods empty
-
-    # clean
-
-    async def test_use_scissors(self) -> None:
-        await self.space.obtain('✂️')
-        for tick in range(Pet.FUR_MAX):
-            await self.space.tick(tick)
-        wool = await self.space.use('✂️')
-        space = await self.space.get()
-        self.assertEqual(wool, ['🧶']) # type: ignore[misc]
-        self.assertEqual(space.items, ['🧶']) # type: ignore[misc]
-        self.assertEqual(space.pet_fur, 0)
-
-    async def test_use_scissors_no_pet_fur(self) -> None:
-        await self.space.obtain('✂️')
-        wool = await self.space.use('✂️')
-        self.assertFalse(wool)
+    async def test_chop_wood_immature_wood(self) -> None:
+        await self.space.obtain('🪓')
+        await self.space.chop_wood()
+        wood = await self.space.chop_wood()
+        self.assertFalse(wood)
 
     async def test_craft(self) -> None:
         await self.space.obtain(*Space.TOOL_MATERIAL['🪓'])
@@ -144,32 +107,68 @@ class SpaceTest(TestCase):
     # /clean
 
 class PetTest(TestCase):
+    TRIALS = 1000
+
+    # TODO
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         self.pet = await self.space.get_pet()
 
     async def test_tick(self) -> None:
+        await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
+        await self.space.craft('🪴')
         await self.pet.tick()
-        pet = await self.space.get_pet()
-        self.assertEqual(pet.dirt, self.pet.dirt + 1)
+        pet = await self.pet.get()
+        space = await self.space.get()
+        self.assertEqual(space.pet_nutrition, (8 - 1) - 1)
+        self.assertEqual(pet.dirt, Pet.DIRT_MAX - (8 - 1) + 1)
+        self.assertEqual(space.pet_fur, 1)
+
+        for _ in range(self.TRIALS):
+            if space.pet_activity_id != '':
+                break
+            await self.pet.tick()
+            space = await space.get()
+        else:
+            self.fail()
+
+    async def test_touch(self) -> None:
+        await self.pet.touch()
+        space = await self.space.get()
+        self.assertTrue(space.pet_hatched)
+
+    async def test_feed(self) -> None:
+        await self.space.obtain('🥕', '🥕')
+        await self.pet.feed()
+        space = await self.space.get()
+        self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
+        self.assertEqual(space.pet_nutrition, Pet.NUTRITION_MAX)
+
+    async def test_feed_full_pet(self) -> None:
+        await self.space.obtain('🥕')
+        await self.pet.feed()
+        with self.assertRaisesRegex(ValueError, 'pet_nutrition'):
+            await self.pet.feed()
+
+    async def test_feed_no_vegetable(self) -> None:
+        with self.assertRaisesRegex(ValueError, 'items'):
+            await self.pet.feed()
 
     async def test_wash(self) -> None:
         await self.pet.wash()
-        pet = await self.space.get_pet()
+        pet = await self.pet.get()
         self.assertFalse(pet.dirt)
 
-    async def test_wash_clean(self) -> None:
+    async def test_wash_clean_pet(self) -> None:
         await self.pet.wash()
         with self.assertRaisesRegex(ValueError, 'dirt'):
             await self.pet.wash()
-
-    # clean
 
     async def test_dress(self) -> None:
         await self.space.obtain('🎀')
         await self.pet.dress('🎀')
         space = await self.space.get()
-        pet = await space.get_pet()
+        pet = await self.pet.get()
         self.assertEqual(pet.clothing, '🎀')
         self.assertFalse(space.items)
 
@@ -178,9 +177,29 @@ class PetTest(TestCase):
         await self.pet.dress('🎀')
         await self.pet.dress(None)
         space = await self.space.get()
-        pet = await space.get_pet()
+        pet = await self.pet.get()
         self.assertIsNone(pet.clothing)
         self.assertEqual(space.items, ['🎀']) # type: ignore[misc]
+
+    async def test_shear(self) -> None:
+        await self.space.obtain('✂️', '🥕')
+        for tick in range(Pet.FUR_MAX):
+            await self.space.tick(tick)
+        wool = await self.pet.shear()
+        space = await self.space.get()
+        self.assertEqual(wool, ['🧶']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🥕', '🧶']) # type: ignore[misc]
+        self.assertEqual(space.pet_fur, 0)
+
+    async def test_shear_immature_fur(self) -> None:
+        await self.space.obtain('✂️')
+        wool = await self.pet.shear()
+        self.assertFalse(wool)
+
+    async def test_change_name(self) -> None:
+        await self.pet.change_name('Frank  ')
+        space = await self.space.get()
+        self.assertEqual(space.pet_name, 'Frank')
 
 class HikeTest(TestCase):
     async def asyncSetUp(self) -> None:
