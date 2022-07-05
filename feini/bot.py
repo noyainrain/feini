@@ -17,18 +17,19 @@
 from __future__ import annotations
 
 import asyncio
-from asyncio import CancelledError, Queue, create_task, shield, sleep
+from asyncio import CancelledError, Queue, Task, create_task, gather, shield, sleep
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from inspect import getmembers
+from inspect import getmembers, iscoroutinefunction, signature
+from itertools import takewhile
 import json
 from json import JSONDecodeError
-from inspect import iscoroutinefunction, signature
 from logging import getLogger
 from typing import Awaitable, AsyncIterator, Callable, cast
 import unicodedata
 from urllib.parse import urljoin
+from weakref import WeakSet
 
 from aiohttp import ClientError, ClientPayloadError, ClientSession, ClientTimeout
 import aioredis.client
@@ -82,6 +83,7 @@ class Bot:
         self.debug = debug
 
         self._chat_modes: dict[str, Mode] = {}
+        self._story_tasks: WeakSet[Task[None]] = WeakSet()
         self._outbox: Queue[Message] = Queue()
 
     async def update(self) -> None:
@@ -118,7 +120,7 @@ class Bot:
                     for space in await self.get_spaces():
                         for time in range(space.time, self.time):
                             await space.tick(time)
-                        create_task(space.tell_stories())
+                        self._story_tasks.add(create_task(space.tell_stories()))
                     logger.info('Simulated world at tick %d', self.time)
                 await sleep((self.time + 1) * self.TICK - datetime.now().timestamp())
                 self.time = int(datetime.now().timestamp() / self.TICK)
@@ -134,6 +136,7 @@ class Bot:
 
     async def close(self) -> None:
         """Close the database connection."""
+        await gather(*self._story_tasks) # type: ignore[misc]
         await self.redis.close()
         # Work around Redis not closing its connection pool (see
         # https://github.com/aio-libs/aioredis-py/issues/1103)
@@ -154,13 +157,13 @@ class Bot:
             space = await self.get_space_by_chat(chat)
         except KeyError:
             space = await self.create_space(chat)
-            create_task(space.tell_stories())
+            self._story_tasks.add(create_task(space.tell_stories()))
             logger.info('Created space for %s (%s)', chat, space.pet_name)
             return '🥚 You found an egg. 😮'
 
         args = self._parse_action(action)
         reply = await self.get_mode(chat).perform(space, *args)
-        create_task(space.tell_stories())
+        self._story_tasks.add(create_task(space.tell_stories()))
         logger.info('%s (%s): %s', chat, space.pet_name, ' '.join(args))
         return reply
 
@@ -178,8 +181,7 @@ class Bot:
     async def get_spaces(self) -> set[Space]:
         """Get all spaces."""
         ids = await self.redis.hvals('spaces_by_chat')
-        spaces = (await self.redis.hgetall(space_id) for space_id in ids)
-        return {Space(data) async for data in spaces if data} # type: ignore[attr-defined,misc]
+        return {Space(data) for space_id in ids if (data := await self.redis.hgetall(space_id))}
 
     async def get_space(self, space_id: str) -> Space:
         """Get the space given by *space_id*."""
@@ -343,11 +345,9 @@ class Bot:
     def _send(self, message: Message) -> None:
         self._outbox.put_nowait(message)
 
-    # TODO clean
     def _parse_action(self, action: str) -> list[str]:
         if not action:
             return []
-
         category = unicodedata.category(action[0])
 
         # Parse space
@@ -356,66 +356,16 @@ class Bot:
 
         # Parse emoji
         if category == 'So':
-            # if len(action) >= 2 and action[1] in '\ufe0e\ufe0f':
-            # return [action[:2]] + self._parse_action(action[2:])
-            # return [action[:1]] + self._parse_action(action[1:])
-            # if len(action) >= 2 and action[1] in '\N{VARIATION SELECTOR-15}\N{VARIATION SELECTOR-16}':
             variation_selectors = '\N{VARIATION SELECTOR-15}\N{VARIATION SELECTOR-16}'
             length = 2 if len(action) >= 2 and action[1] in variation_selectors else 1
-            return [action[:length]] + self._parse_action(action[length:])
+            return [action[:length], *self._parse_action(action[length:])]
 
         # Parse word
-        from itertools import takewhile
-        def isword(character: str) -> bool:
+        def isletter(character: str) -> bool:
             category = unicodedata.category(character)
             return not (category.startswith('Z') or category == 'So')
-        word = str(takewhile(isword, action))
-        return [word] + self._parse_action(action[len(word):])
-
-        #i = 0
-        #while not (category == 'So' or category.startswith('Z')):
-        #    i += 1
-        #    if i >= len(action):
-        #        break
-        #    category = unicodedata.category(action[i])
-        #return [action[:i]] + self._parse_action(action[i:])
-
-        #i = next(i for i, character in action if not (category.startswith('Z') or category == 'So'))
-        #return [action[:i]] + self._parse_action(action[i:])
-
-        #index = len(action)
-        #for i, c in enumerate(action):
-        #    if unicodedata.category(c) == 'So':
-        #        index = i
-        #        break
-
-    #@staticmethod
-    #def _parse(command: str) -> list[str]:
-    #    tokens: list[str] = []
-    #    text: list[str] = []
-    #    emoji: list[str] = []
-    #    for c in command:
-    #        if emoji:
-    #            if c in '\ufe0e\ufe0f': # Emoji variation sequence
-    #                emoji.append(c)
-    #                tokens.append(''.join(emoji))
-    #                emoji = []
-    #                continue
-    #            else:
-    #                tokens.append(''.join(emoji))
-    #                emoji = []
-    #
-    #        print(c, ord(c))
-    #        if unicodedata.category(c) = 'So':
-    #            if text:
-    #                tokens.append(''.join(text).strip())
-    #                text = []
-    #            tokens.append(c)
-    #        else:
-    #            text.append(c)
-    #    if text:
-    #        tokens.append(''.join(text).strip())
-    #    return tokens
+        word = ''.join(takewhile(isletter, action))
+        return [word, *self._parse_action(action[len(word):])]
 
 @dataclass
 class Message:
@@ -518,147 +468,3 @@ class Telegram:
                 raise ClientPayloadError(f'Bad error_code {code}')
             except TypeError as e:
                 raise ClientPayloadError(str(e)) from e
-
-# /clean
-
-#class Telegram:
-#    @dataclass
-#    class Update:
-#        update_id: int
-#        message: Telegram.Message
-#
-#        @staticmethod
-#        def parse(data: dict[str, object]) -> Telegram.Update:
-#            update_id = data['update_id']
-#            message_data = data['message']
-#            if not isinstance(update_id, int):
-#                raise TypeError(update_id, type(update_id))
-#            if not isinstance(message_data, dict):
-#                raise TypeError()
-#            return Telegram.Update(update_id, Telegram.Message.parse(message_data))
-#
-#    @dataclass
-#    class Message:
-#        frm: Telegram.User
-#        text: str
-#
-#        @staticmethod
-#        def parse(data: dict[str, object]) -> Telegram.Message:
-#            frm = data.get('from')
-#            text = data.get('text')
-#            if not isinstance(frm, dict):
-#                raise TypeError()
-#            if not isinstance(text, str):
-#                raise TypeError()
-#            return Telegram.Message(Telegram.User.parse(frm), text)
-#
-#    @dataclass
-#    class User:
-#        id: int
-#
-#        @staticmethod
-#        def parse(data: dict[str, object]) -> Telegram.User:
-#            id = data['id']
-#            if not isinstance(id, int):
-#                raise TypeError()
-#            return Telegram.User(id)
-
-#class Space:
-#    def __init__(self, data: JSON) -> None:
-#        x = JSONObject(data)
-#        self.id = x.get('id', str)
-#        self.chat = x.get('chat', str)
-#        self.pet_name = x.get('pet_name', str)
-#
-#    def json(self) -> JSON:
-#        return {'id': self.id, 'chat': self.chat, 'pet_name': self.pet_name}
-#
-#    async def edit_pet_name(self, bot: Bot, name: str) -> Space:
-#        data = await rpatch(self.id, {'pet_name': name}, bot.redis)
-#        return Space(data)
-#
-#async def rpatch(id: str, patch: JSON, redis: Redis) -> JSON:
-#    f = redis.register_script("""
-#        local id, patch = unpack(KEYS), unpack(ARGV)
-#        patch = cjson.decode(patch)
-#        local object = cjson.decode(redis.call("GET", id))
-#        for name, value in ipairs(patch) do
-#            object[name] = value
-#        end
-#        object = cjson.encode(object)
-#        redis.call("SET", id, object)
-#        return object
-#    """)
-#    result = await cast(Awaitable[object], f([id], [json.dumps(patch)]))
-#    assert isinstance(result, bytes)
-#    data = cast(object, json.loads(result))
-#    assert isinstance(data, dict)
-#    return data
-
-#_T = TypeVar('_T')
-
-#def get_json(data: object, key: str, cls: Type[_T]) -> _T:
-#    if not isinstance(data, dict):
-#        raise TypeError()
-#    value = data[key]
-#    if not isinstance(value, cls):
-#        raise TypeError()
-#    return value
-
-#JSON = dict[str, object]
-
-#@dataclass
-#class Space:
-#    id: str
-#    chat: str
-#    pet_name: str
-#
-#    async def edit_pet_name(self, bot: Bot, name: str) -> Space:
-#        await cast(Awaitable[object], bot.redis.hset(f'Space:{self.id}', 'pet_name', name))
-#        return dataclasses.replace(self, pet_name=name)
-
-#2x
-#🧶🧶🧶🧶🧶🧶🧶🧶
-#🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵
-#🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨
-#	
-#4x
-#🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶
-#🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵
-#🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨
-#
-#6x (yarn / 2 days)
-#⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶⬜🧶
-#🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵
-#🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨
-#
-#6x
-#🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶
-#🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵
-#🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨
-#
-#11(12) items = 22d
-#6x with sizes S & M & L
-#🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶🧶⬜⬜⬜⬜⬜⬜
-#🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵🪵
-#🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨🪨
-#
-#goal: craft / 2 days
-#5 (rock, wood, 1 yarn) resourcen / day
-#=> 5 resources / item
-#2 sizes: S & L(incl M)
-#
-#11 items
-#22 days
-#66 resources
-
-#'🕛': Object,   # Cha
-#'🔮': Object,   # Var
-            #'🕛': [
-            #    '🕛\N{VARIATION SELECTOR-16}', '🕐', '🕐\N{VARIATION SELECTOR-16}', '🕑',
-            #    '🕑\N{VARIATION SELECTOR-16}', '🕒', '🕒\N{VARIATION SELECTOR-16}', '🕓',
-            #    '🕓\N{VARIATION SELECTOR-16}', '🕔', '🕔\N{VARIATION SELECTOR-16}', '🕕',
-            #    '🕕\N{VARIATION SELECTOR-16}', '🕖', '🕖\N{VARIATION SELECTOR-16}', '🕗',
-            #    '🕗\N{VARIATION SELECTOR-16}', '🕘', '🕘\N{VARIATION SELECTOR-16}', '🕙',
-            #    '🕙\N{VARIATION SELECTOR-16}', '🕚', '🕚\N{VARIATION SELECTOR-16}', '🕰️',
-            #    '🕰️\N{VARIATION SELECTOR-16}']

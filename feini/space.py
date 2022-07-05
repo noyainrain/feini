@@ -49,21 +49,21 @@ CHARACTER_NAMES = {
 class Space(Entity):
     """Space inhabited by a pet.
 
+    .. attribute:: chat
+
+       Chat the space belongs to.
+
     .. attribute:: time
 
        Current simulation time.
 
-    .. attribute:: chat
-
-       TODO.
-
     .. attribute:: items
 
-       TODO.
+       Item inventory.
 
     .. attribute:: tools
 
-       TODO.
+       Tool inventory.
 
     .. attribute:: meadow_vegetable_growth
 
@@ -99,7 +99,7 @@ class Space(Entity):
 
     .. attribute:: pet_activity_id
 
-       TODO.
+       Current pet activity emoji or ID of the furniture item the pet is engaged with.
 
     .. attribute:: MEADOW_VEGETABLE_GROWTH_MAX
 
@@ -202,24 +202,16 @@ class Space(Entity):
         """Get the residing pet."""
         return await context.bot.get().get_pet(self.pet_id)
 
-    # TODO clean
     async def get_blueprints(self) -> list[str]:
         """Get known blueprints."""
         return await context.bot.get().redis.zrange(f'{self.id}.blueprints', 0, -1)
 
-    # TODO clean
-    async def get_objects(self) -> list[Furniture]:
-        bot = context.bot.get()
-        key = f'{self.id}.items'
-        async with transaction(bot.redis, key) as pipe:
-            item_ids = await pipe.lrange(key, 0, -1)
-            pipe.multi()
-            for item_id in item_ids:
-                pipe.hgetall(item_id)
-            items = cast(list[dict[str, str]], await pipe.execute())
-            return [FURNITURE_TYPES[data['type']](data) for data in items]
-
-    # clean
+    async def get_furniture(self) -> list[Furniture]:
+        """Get owned furniture."""
+        redis = context.bot.get().redis
+        ids = await redis.lrange(f'{self.id}.items', 0, -1)
+        return [FURNITURE_TYPES[data['type']](data)
+                for item_id in ids if (data := await redis.hgetall(item_id))]
 
     async def get_characters(self) -> list[Character]:
         """Get the present characters."""
@@ -242,13 +234,7 @@ class Space(Entity):
         return {parse_story(data) # type: ignore[misc]
                 async for data in stories if data} # type: ignore[attr-defined,misc]
 
-    # /clean
-
-    async def get_pet_activity(self) -> Object | str:
-        if self.pet_activity_id in {'', '💤', '🍃'}:
-            return self.pet_activity_id
-        return await context.bot.get().get_object(self.pet_activity_id)
-
+    # TODO
     async def tick(self, time: int) -> Space:
         """Simulate the space at *time* for one tick.
 
@@ -258,7 +244,7 @@ class Space(Entity):
 
         pet = await self.get_pet()
         await pet.tick()
-        for item in await self.get_objects():
+        for item in await self.get_furniture():
             await item.tick(time)
 
         async with bot.redis.pipeline() as pipe:
@@ -295,8 +281,6 @@ class Space(Entity):
 
         return space
 
-    # clean
-
     async def obtain(self, *items: str) -> None:
         """Obtain the given *items*.
 
@@ -323,8 +307,7 @@ class Space(Entity):
                       mapping={'resources': ' '.join(stock), 'tools': ' '.join(tools_stock)})
             await pipe.execute()
 
-    # /clean
-
+    # TODO
     async def gather_meadow(self) -> list[str]:
         async with transaction(context.bot.get().redis, self.id) as pipe:
             items = (await pipe.hget(self.id, 'resources') or '').split()
@@ -339,6 +322,7 @@ class Space(Entity):
             await pipe.execute()
             return gathered
 
+    # TODO
     async def chop_wood(self) -> list[str]:
         async with transaction(context.bot.get().redis, self.id) as pipe:
             space = Space(await pipe.hgetall(self.id))
@@ -353,33 +337,6 @@ class Space(Entity):
                 pipe.hset(self.id, mapping={'resources': ' '.join(items), 'woods_growth': 0})
             await pipe.execute()
             return wood
-
-    @overload
-    async def use(self, item: Literal['✂️']) -> list[str]:
-        pass
-    @overload
-    async def use(self, item: str) -> object:
-        pass
-    async def use(self, item: str) -> object:
-        if item == '✂️':
-            return await self._shear_pet()
-        raise ValueError(f'Invalid item {item}')
-
-    async def _shear_pet(self) -> list[str]:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            space = Space(await pipe.hgetall(self.id))
-            if '✂️' not in space.tools:
-                raise ValueError('Scissors not in tools')
-            pipe.multi()
-            wool = []
-            if space.pet_fur == Pet.FUR_MAX:
-                wool = ['🧶']
-                items = sorted(space.items + wool, key=Space.ITEM_WEIGHTS.__getitem__)
-                pipe.hset(self.id, mapping={'resources': ' '.join(items), 'pet_fur': 0})
-            await pipe.execute()
-            return wool
-
-    # clean
 
     async def craft(self, blueprint: str) -> str | Furniture:
         """Craft a new object given by *blueprint*."""
@@ -455,34 +412,6 @@ class Space(Entity):
             await pipe.execute()
         return pattern
 
-    # /clean
-
-    async def touch_pet(self) -> None:
-        await context.bot.get().redis.hset(self.id, 'pet_is_egg', '')
-
-    async def feed_pet(self) -> None:
-        async with transaction(context.bot.get().redis, self.id) as pipe:
-            items = (await pipe.hget(self.id, 'resources') or '').split()
-            nutrition = int(await pipe.hget(self.id, 'pet_nutrition') or '')
-            pipe.multi()
-            if nutrition == Pet.NUTRITION_MAX:
-                raise ValueError('Max pet_nutrition')
-            try:
-                items.remove('🥕')
-            except ValueError as e:
-                raise ValueError('🥕 not in items') from e
-            pipe.hset(self.id, mapping={'resources': ' '.join(items), 'pet_nutrition': 25})
-            await pipe.execute()
-
-    async def change_pet_name(self, name: str) -> Space:
-        async with context.bot.get().redis.pipeline() as pipe:
-            pipe.hset(self.id, 'pet_name', name)
-            pipe.hgetall(self.id)
-            data = await cast(Awaitable[list[dict[str, str]]], pipe.execute())
-            return Space(data[-1])
-
-    # clean
-
     async def hike(self) -> Hike:
         """Start a hike.
 
@@ -524,15 +453,73 @@ class Space(Entity):
             except ReferenceError:
                 pass
 
-    # /clean
-
     # TODO later: cook
     # TODO later: website
     # - after crafting furniture, set activity to new object - show std touch msg or something like
     # "feini is very curios"
-
     # wash_pet() pet_hygiene dirty
 
+    # TODO
+    async def get_pet_activity(self) -> Furniture | str:
+        """Get the current pet activity emoji or furniture item the pet is engaged with."""
+        if self.pet_activity_id in {'', '💤', '🍃'}:
+            return self.pet_activity_id
+        return await context.bot.get().get_furniture_item(self.pet_activity_id)
+
+    # TODO
+    async def touch_pet(self) -> None:
+        await context.bot.get().redis.hset(self.id, 'pet_is_egg', '')
+
+    # TODO
+    async def feed_pet(self) -> None:
+        async with transaction(context.bot.get().redis, self.id) as pipe:
+            items = (await pipe.hget(self.id, 'resources') or '').split()
+            nutrition = int(await pipe.hget(self.id, 'pet_nutrition') or '')
+            pipe.multi()
+            if nutrition == Pet.NUTRITION_MAX:
+                raise ValueError('Max pet_nutrition')
+            try:
+                items.remove('🥕')
+            except ValueError as e:
+                raise ValueError('🥕 not in items') from e
+            pipe.hset(self.id, mapping={'resources': ' '.join(items), 'pet_nutrition': 25})
+            await pipe.execute()
+
+    # TODO
+    @overload
+    async def use(self, item: Literal['✂️']) -> list[str]:
+        pass
+    @overload
+    async def use(self, item: str) -> object:
+        pass
+    async def use(self, item: str) -> object:
+        if item == '✂️':
+            return await self._shear_pet()
+        raise ValueError(f'Invalid item {item}')
+
+    async def _shear_pet(self) -> list[str]:
+        async with transaction(context.bot.get().redis, self.id) as pipe:
+            space = Space(await pipe.hgetall(self.id))
+            if '✂️' not in space.tools:
+                raise ValueError('Scissors not in tools')
+            pipe.multi()
+            wool = []
+            if space.pet_fur == Pet.FUR_MAX:
+                wool = ['🧶']
+                items = sorted(space.items + wool, key=Space.ITEM_WEIGHTS.__getitem__)
+                pipe.hset(self.id, mapping={'resources': ' '.join(items), 'pet_fur': 0})
+            await pipe.execute()
+            return wool
+
+    # TODO
+    async def change_pet_name(self, name: str) -> Space:
+        async with context.bot.get().redis.pipeline() as pipe:
+            pipe.hset(self.id, 'pet_name', name)
+            pipe.hgetall(self.id)
+            data = await cast(Awaitable[list[dict[str, str]]], pipe.execute())
+            return Space(data[-1])
+
+# TODO
 class Pet(Entity):
     """Pet.
 
@@ -612,8 +599,6 @@ class Pet(Entity):
 
     def __str__(self) -> str:
         return f"🐕{self.clothing or ''}"
-
-# clean
 
 @dataclass
 class Message:
@@ -909,8 +894,6 @@ class Hike:
                 # If needed, this could be improved with a recursive random bucket.
                 bucket.insert(randint(0, len(bucket)), path + [coords])
         return distances
-
-# /clean
 
 # TODO kill this, use pipe.watch(...) explicityl, do not retry on watch error,
 # just tell the user to try again, it will be so selten, mostly never, really...

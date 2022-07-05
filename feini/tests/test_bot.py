@@ -19,9 +19,20 @@ from unittest import IsolatedAsyncioTestCase
 from feini import context
 from feini.actions import HikeMode
 from feini.bot import Bot
-from feini.space import Hike, Space
+from feini.space import Hike
 
-class FeiniTestCase(IsolatedAsyncioTestCase):
+class TestCase(IsolatedAsyncioTestCase):
+    """Open Feini test case.
+
+    .. attribute:: bot
+
+       Chatbot under test.
+
+    .. attribute:: space
+
+       Test space.
+    """
+
     async def asyncSetUp(self) -> None:
         self.bot = Bot(redis_url='redis:15', debug=True)
         await self.bot.redis.flushdb()
@@ -31,56 +42,19 @@ class FeiniTestCase(IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.bot.close()
 
-    async def obtain(self, resources: list[str]) -> None:
-        space = await self.bot.get_space(self.space.id)
-        if '🪵'  in resources and '🪓' not in space.tools:
-            await self.obtain(Space.COSTS['🪓'])
-            await space.craft('🪓')
-        if '🧶' in resources and '✂️' not in space.tools:
-            await self.obtain(Space.COSTS['✂️'])
-            await space.craft('✂️')
-
-        resources = list(resources)
-        while True:
-            obtained = []
-            if '🥕' in resources or '🪨' in resources:
-                obtained += await space.gather_meadow()
-            if '🪵' in resources:
-                obtained += await space.chop_wood()
-            if '🧶' in resources:
-                obtained += await space.use('✂️')
-            for resource in obtained:
-                try:
-                    resources.remove(resource)
-                except ValueError:
-                    pass
-            if not resources:
-                break
-            space = await self.bot.get_space(self.space.id)
-            await space.tick(space.time)
-
-            #await self.space.gather_meadow()
-            #space = await context.bot.get().get_space(self.space.id)
-            #if space.resources.count('🥕') >= veggies:
-            #    break
-            #await space.tick(space.time)
-
-class BotTest(FeiniTestCase):
+class BotTest(TestCase):
     async def test_set_mode(self) -> None:
-        mode_in = HikeMode(Hike(self.space))
-        self.bot.set_mode(self.space.chat, mode_in)
-        mode_out = self.bot.get_mode(self.space.chat)
-        self.assertIs(mode_out, mode_in)
+        mode = HikeMode(Hike(self.space))
+        self.bot.set_mode(self.space.chat, mode)
+        self.assertIs(self.bot.get_mode(self.space.chat), mode)
 
     async def test_create_space(self) -> None:
         space = await self.bot.create_space('chat')
+        pet = await space.get_pet()
         self.assertEqual(space.chat, 'chat')
         self.assertIn(space, await self.bot.get_spaces())
         self.assertEqual(await self.bot.get_space(space.id), space)
         self.assertEqual(await self.bot.get_space_by_chat(space.chat), space)
-        pet = await space.get_pet()
         self.assertEqual(pet.space_id, space.id)
         self.assertTrue(await space.get_blueprints())
         self.assertTrue(await space.get_stories())
-
-# /clean

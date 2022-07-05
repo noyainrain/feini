@@ -15,9 +15,9 @@
 # pylint: disable=missing-docstring
 
 from feini.stories import IntroStory, SewingStory
-from feini.tests.test_space import FeiniTestCase
+from .test_bot import TestCase
 
-class IntroStoryTest(FeiniTestCase):
+class IntroStoryTest(TestCase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         self.story = next(story for story in await self.space.get_stories()
@@ -57,7 +57,7 @@ class IntroStoryTest(FeiniTestCase):
         self.assertEqual(story.chapter, 'touch')
         self.assertEqual(story.update_time, 0)
 
-class SewingStoryTest(FeiniTestCase):
+class SewingStoryTest(TestCase):
     async def test_tell(self) -> None:
         story = next(story for story in await self.space.get_stories()
                      if isinstance(story, SewingStory))

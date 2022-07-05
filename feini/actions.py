@@ -29,7 +29,8 @@ from typing import ClassVar, Generic, Protocol, TypeVar, cast, overload
 import unicodedata
 
 from . import context
-from .furniture import Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_TYPES
+from .furniture import (Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL,
+                        FURNITURE_TYPES)
 from .space import Hike, Pet, Space, CHARACTER_NAMES
 from .util import isemoji
 
@@ -133,7 +134,7 @@ def entity_action(entity_type: str) -> Callable[[_EntityActionCallable], Action[
     """
     def decorator(func: _EntityActionCallable) -> Action[MainMode]:
         async def wrapper(self: MainMode, space: Space, *args: str) -> str:
-            entities = await space.get_objects()
+            entities = await space.get_furniture()
             entity = next((entity for entity in entities if entity.type == entity_type), None)
             if not entity:
                 return await self.default(space, *args)
@@ -219,13 +220,13 @@ class MainMode(Mode):
 
     @action('⛺')
     async def view_home(self, space: Space, *args: str) -> str:
-        furniture = ''.join(str(item) for item in await space.get_objects())
+        furniture = ''.join(str(item) for item in await space.get_furniture())
         characters = ''.join(character.avatar for character in await space.get_characters())
         return dedent(f"""\
             ⛺{furniture} {characters}
 
             Items:
-            {''.join(space.resources) or '-'}
+            {''.join(space.items) or '-'}
             Tools:
             {''.join(space.tools)}
         """)
@@ -278,11 +279,13 @@ class MainMode(Mode):
         try:
             blueprint = normalize_emoji(args[1])
         except IndexError:
-            blueprint = '_'
+            blueprint = ''
+        material = ''.join(Space.TOOL_MATERIAL.get(blueprint) or FURNITURE_MATERIAL.get(blueprint)
+                           or '')
 
         try:
             await space.craft(blueprint)
-            return f"🔨 You spent {''.join(Space.COSTS[blueprint])} to craft a new {blueprint}. 🥳"
+            return f'🔨 You spent {material} to craft a new {blueprint}. 🥳'
 
         except ValueError as e:
             if 'blueprint' in str(e):
@@ -311,7 +314,7 @@ class MainMode(Mode):
                 """)
 
             if 'resources' in str(e):
-                return f"You need {''.join(Space.COSTS[blueprint])} to craft a {blueprint}."
+                return f'You need {material} to craft a {blueprint}.'
             raise
 
     @item_action('🪡')
@@ -319,7 +322,7 @@ class MainMode(Mode):
         try:
             pattern = normalize_emoji(args[1])
         except IndexError:
-            pattern = '_'
+            pattern = ''
 
         try:
             material = ''.join(space.CLOTHING_MATERIAL[pattern])
@@ -407,7 +410,7 @@ class MainMode(Mode):
 
     @entity_action('🪴')
     async def view_plant(self, space: Space, entity: Furniture, *args: str) -> str:
-        assert isinstance(entity, HousePlant)
+        assert isinstance(entity, Houseplant)
         return random.choice([f'{entity.state} Good quality!', f'{entity.state} Beautiful!'])
 
     @entity_action('⛲')

@@ -21,15 +21,11 @@ from itertools import cycle, islice
 from feini.context import bot
 from feini.furniture import Houseplant, FURNITURE_MATERIAL
 from feini.space import Hike, Pet, Space
-from .test_bot import FeiniTestCase
-
-#class FeiniTestCase(IsolatedAsyncioTestCase):
-#    async def asyncSetUp(self) -> None:
-#        context.bot.set(Bot())
+from .test_bot import TestCase
 
 # clean
 
-class SpaceTest(FeiniTestCase):
+class SpaceTest(TestCase):
     async def test_tick(self) -> None:
         await self.space.tick(self.space.time)
         space = await self.space.get()
@@ -81,12 +77,12 @@ class SpaceTest(FeiniTestCase):
         self.assertFalse(resources)
 
     async def test_chop_wood(self) -> None:
-        await self.obtain(Space.TOOL_MATERIAL['🪓'])
+        await self.space.obtain(*Space.TOOL_MATERIAL['🪓'])
         await self.space.craft('🪓')
         wood = await self.space.chop_wood()
         space = await self.bot.get_space(self.space.id)
         self.assertEqual(wood, ['🪵']) # type: ignore[misc]
-        self.assertEqual(space.items, ['🥕', '🪵']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🪵']) # type: ignore[misc]
         self.assertEqual(space.woods_growth, 0)
 
     # test_chop_woods empty
@@ -121,7 +117,7 @@ class SpaceTest(FeiniTestCase):
         plant = await self.space.craft('🪴')
         space = await self.space.get()
         assert isinstance(plant, Houseplant)
-        self.assertEqual(await space.get_objects(), [plant]) # type: ignore[misc]
+        self.assertEqual(await space.get_furniture(), [plant]) # type: ignore[misc]
         self.assertEqual(await self.bot.get_furniture_item(plant.id), plant)
         self.assertFalse(space.items)
 
@@ -147,7 +143,7 @@ class SpaceTest(FeiniTestCase):
 
     # /clean
 
-class PetTest(FeiniTestCase):
+class PetTest(TestCase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         self.pet = await self.space.get_pet()
@@ -186,7 +182,7 @@ class PetTest(FeiniTestCase):
         self.assertIsNone(pet.clothing)
         self.assertEqual(space.items, ['🎀']) # type: ignore[misc]
 
-class HikeTest(FeiniTestCase):
+class HikeTest(TestCase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         await self.space.obtain(*Space.TOOL_MATERIAL['🧭'])

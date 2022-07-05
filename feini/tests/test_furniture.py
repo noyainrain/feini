@@ -15,12 +15,11 @@
 # pylint: disable=missing-docstring
 
 from feini.furniture import Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL
-from feini.space import Space
-from .test_bot import FeiniTestCase
+from .test_bot import TestCase
 
 TRIALS = 1000
 
-class HouseplantTest(FeiniTestCase):
+class HouseplantTest(TestCase):
     async def test_tick(self) -> None:
         await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
         plant = await self.space.craft('🪴')
@@ -34,7 +33,7 @@ class HouseplantTest(FeiniTestCase):
         else:
             self.fail()
 
-class TelevisionTest(FeiniTestCase):
+class TelevisionTest(TestCase):
     async def test_use(self) -> None:
         await self.space.obtain(*FURNITURE_MATERIAL['📺'])
         tv = await self.space.craft('📺')
@@ -49,7 +48,7 @@ class TelevisionTest(FeiniTestCase):
         else:
             self.fail()
 
-class NewspaperTest(FeiniTestCase):
+class NewspaperTest(TestCase):
     async def test_use(self) -> None:
         await self.space.obtain(*FURNITURE_MATERIAL['🗞️'])
         newspaper = await self.space.craft('🗞️')
@@ -64,7 +63,7 @@ class NewspaperTest(FeiniTestCase):
         else:
             self.fail()
 
-class PaletteTest(FeiniTestCase):
+class PaletteTest(TestCase):
     async def test_tick(self) -> None:
         await self.space.obtain(*FURNITURE_MATERIAL['🎨'])
         palette = await self.space.craft('🎨')
