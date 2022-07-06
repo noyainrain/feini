@@ -14,7 +14,10 @@
 
 """Player actions."""
 
-# pylint: disable=missing-function-docstring
+# Message style guide: The pet is described from an outside perspective, e.g. "Feini looks happy" or
+# "Feini is playing happily" instead of "Feini is excited".
+
+# pylint: disable=missing-function-docstring,unused-argument
 
 from __future__ import annotations
 
@@ -29,25 +32,23 @@ from typing import ClassVar, Generic, Protocol, TypeVar, cast, overload
 import unicodedata
 
 from . import context
-from .furniture import (Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL,
-                        FURNITURE_TYPES)
+from .furniture import Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL
 from .space import Hike, Pet, Space, CHARACTER_NAMES
 from .util import isemoji
 
-_M = TypeVar('_M', bound='Mode', contravariant=True)
-
 ngettext = NullTranslations().ngettext
 
-class _ActionCallable(Protocol[_M]):
-    async def __call__(_, self: _M, space: Space, *args: str) -> str:
-        # pylint: disable=no-self-argument
+_M_contra = TypeVar('_M_contra', bound='Mode', contravariant=True)
+
+class _ActionCallable(Protocol[_M_contra]):
+    async def __call__(_, self: _M_contra, space: Space, *args: str) -> str:
         pass
 
 class _ActionMethod(Protocol):
     async def __call__(self, space: Space, *args: str) -> str:
         pass
 
-class Action(Generic[_M]):
+class Action(Generic[_M_contra]):
     """Perform a player action with the arguments *args* in *space*.
 
     A reaction message is returned.
@@ -63,23 +64,24 @@ class Action(Generic[_M]):
        Name of the action.
     """
 
-    def __init__(self, func: _ActionCallable[_M], name: str) -> None:
+    def __init__(self, func: _ActionCallable[_M_contra], name: str) -> None:
         self.func = func
         self.name = name
 
     @overload
-    def __get__(self, instance: None, owner: type[_M] | None = None) -> Action[_M]:
+    def __get__(self, instance: None, owner: type[_M_contra] | None = None) -> Action[_M_contra]:
         pass
     @overload
-    def __get__(self, instance: _M, owner: type[_M] | None = None) -> _ActionMethod:
+    def __get__(self, instance: _M_contra, owner: type[_M_contra] | None = None) -> _ActionMethod:
         pass
-    def __get__(self, instance: _M | None,
-                owner: type[_M] | None = None) -> Action[_M] | _ActionMethod:
+    def __get__(self, instance: _M_contra | None,
+                owner: type[_M_contra] | None = None) -> Action[_M_contra] | _ActionMethod:
         return self if instance is None else partial(self.func, instance)
 
-def action(name: str) -> Callable[[_ActionCallable[_M]], Action[_M]]:
+def action(name: str) -> Callable[[_ActionCallable[_M_contra]], Action[_M_contra]]:
     """Decorator to define a player action called *name*."""
-    return cast(Callable[[_ActionCallable[_M]], Action[_M]], partial(Action, name=name))
+    return cast(Callable[[_ActionCallable[_M_contra]], Action[_M_contra]],
+                partial(Action, name=name))
 
 class Mode:
     """Chat mode comprising a set of player actions."""
@@ -100,6 +102,7 @@ class Mode:
         A reaction message is returned.
         """
         try:
+            # pylint: disable=unnecessary-dunder-call
             f = self._actions[normalize_emoji(args[0])].__get__(self)
         except (KeyError, IndexError):
             f = self.default
@@ -109,9 +112,8 @@ class Mode:
         """Perform the default action if no other available action matches."""
         raise NotImplementedError()
 
-class _EntityActionCallable(Protocol):
-    async def __call__(_, self: MainMode, space: Space, entity: Furniture, *args: str) -> str:
-        # pylint: disable=no-self-argument
+class _FurnitureActionCallable(Protocol):
+    async def __call__(_, self: MainMode, space: Space, piece: Furniture, *args: str) -> str:
         pass
 
 def item_action(item: str) -> Callable[[_ActionCallable[MainMode]], Action[MainMode]]:
@@ -127,22 +129,23 @@ def item_action(item: str) -> Callable[[_ActionCallable[MainMode]], Action[MainM
         return Action(wrapper, name=item)
     return decorator
 
-def entity_action(entity_type: str) -> Callable[[_EntityActionCallable], Action[MainMode]]:
-    """Decorator to define a player action with an *entity_type* entity.
+def furniture_action(furniture_type: str) -> Callable[[_FurnitureActionCallable], Action[MainMode]]:
+    """Decorator to define a player action with a *furniture_type* piece of furniture.
 
-    *entity* is the relevant entity. If there is no such entity, an appropriate message is returned.
+    *piece* is the relevant piece of furniture. If there is no such piece of furniture, an
+    appropriate message is returned.
     """
-    def decorator(func: _EntityActionCallable) -> Action[MainMode]:
+    def decorator(func: _FurnitureActionCallable) -> Action[MainMode]:
         async def wrapper(self: MainMode, space: Space, *args: str) -> str:
-            entities = await space.get_furniture()
-            entity = next((entity for entity in entities if entity.type == entity_type), None)
-            if not entity:
+            piece = next(
+                (piece for piece in await space.get_furniture() if piece.type == furniture_type),
+                None)
+            if not piece:
                 return await self.default(space, *args)
-            return await func(self, space, entity, *args)
-        return Action(wrapper, name=entity_type)
+            return await func(self, space, piece, *args)
+        return Action(wrapper, name=furniture_type)
     return decorator
 
-# TODO in actions.py: (use on first action arg and match with actions, so maybe in Mode)
 _EMOJI_VARIANTS = {
     '🪨': ['🧱'],
     '🧶': ['🧵', '🪢'],
@@ -178,9 +181,16 @@ _EMOJI_NORMAL_FORMS = {
 }
 
 def normalize_emoji(emoji: str) -> str:
-    """TODO. emoji variations, multiple emojis expressing the same concept and text alias.
-    normalize. *emoji* may also be a text representation"""
+    """Normalize the given *emoji*.
+
+    A definite emoji is used for variants expressing the same concept. The most compact emoji
+    presentation is used for variation sequences.
+    """
     return _EMOJI_NORMAL_FORMS.get(emoji) or emoji
+
+def speak() -> str:
+    """Generate pet speech."""
+    return ' '.join(random.choice(['Woof!', 'Arf!']) for _ in range(randint(1, 2)))
 
 def pet_message(pet: Pet, text: str, *, focus: str = '', mood: str = '') -> str:
     """Write a message about *pet* containing *text*.
@@ -196,8 +206,6 @@ def pet_message(pet: Pet, text: str, *, focus: str = '', mood: str = '') -> str:
 
 class MainMode(Mode):
     """Main chat mode."""
-
-    # pylint: disable=no-self-use,unused-argument
 
     _DIALOGUE = {
         'ghost-sewing-hello': ['Where am I?'],
@@ -220,7 +228,7 @@ class MainMode(Mode):
 
     @action('⛺')
     async def view_home(self, space: Space, *args: str) -> str:
-        furniture = ''.join(str(item) for item in await space.get_furniture())
+        furniture = ''.join(str(piece) for piece in await space.get_furniture())
         characters = ''.join(character.avatar for character in await space.get_characters())
         return dedent(f"""\
             ⛺{furniture} {characters}
@@ -256,23 +264,19 @@ class MainMode(Mode):
             raise
         return 'You stocked up. 😅'
 
-    # /clean
-
     @item_action('🧺')
-    async def gather_meadow(self, space: Space, *args: str) -> str:
+    async def gather(self, space: Space, *args: str) -> str:
         resources = await space.gather()
-        if resources:
-            return f"🧺 You gathered {''.join(resources)} from the meadow. 😊"
-        return '🧺 The meadow is empty. Maybe try again later?'
+        if not resources:
+            return 'The meadow is empty. Maybe try again later?'
+        return f"🧺 You gathered {''.join(resources)} from the meadow. 😊"
 
     @item_action('🪓')
     async def chop_wood(self, space: Space, *args: str) -> str:
         wood = await space.chop_wood()
-        if wood:
-            return f"🪓 You chopped {''.join(wood)} in the woods. 😊"
-        return '🪓 There are no more logs in the woods. Maybe try again later?'
-
-    # clean
+        if not wood:
+            return 'There are no more logs in the woods. Maybe try again later?'
+        return f"🪓 You chopped {''.join(wood)} from the woods. 😊"
 
     @item_action('🔨')
     async def craft(self, space: Space, *args: str) -> str:
@@ -291,21 +295,20 @@ class MainMode(Mode):
             if 'blueprint' in str(e):
                 blueprints = await space.get_blueprints()
                 catalog = {
-                    'Tools': [
-                        blueprint for blueprint in blueprints
-                        if blueprint in space.ITEM_CATEGORIES['tool']],
-                    'Furniture': [blueprint
-                                  for blueprint in blueprints if blueprint in FURNITURE_TYPES]
+                    'Tools': {blueprint: cost for blueprint in blueprints
+                              if (cost := Space.TOOL_MATERIAL.get(blueprint))},
+                    'Furniture': {blueprint: cost for blueprint in blueprints
+                                  if (cost := FURNITURE_MATERIAL.get(blueprint))}
                 }
                 line_break = '\n                    '
-                catalog_material = {
+                catalog_blocks = {
                     category:
-                        line_break.join(f"{blueprint}: {''.join(space.COSTS[blueprint])}"
-                                        for blueprint in blueprints)
+                        line_break.join(f"{blueprint}: {''.join(cost)}"
+                                        for blueprint, cost in blueprints.items())
                         for category, blueprints in catalog.items()
                 }
-                catalog_text = line_break.join(f'{category}:{line_break}{blueprints}'
-                                               for category, blueprints in catalog_material.items())
+                catalog_text = line_break.join(f'{category}:{line_break}{block}'
+                                               for category, block in catalog_blocks.items())
                 return dedent(f"""\
                     🔨 ⬜Item
                     Craft a new item.
@@ -346,32 +349,6 @@ class MainMode(Mode):
                 return f'You need {material} to sew a {pattern}.'
             raise
 
-    async def _dress_pet(self, space: Space, *args: str) -> str:
-        clothing = normalize_emoji(args[0])
-        pet = await space.get_pet()
-
-        if pet.clothing == clothing:
-            await pet.dress(None)
-            return pet_message(await space.get_pet(),
-                               f"{space.pet_name} let's you take off the {clothing}.", mood='😊')
-
-        await pet.dress(clothing)
-        pet = await space.get_pet()
-        return random.choice([
-            pet_message(pet, f'{space.pet_name} looks very pretty.', mood='😊'),
-            pet_message(pet, f'{space.pet_name} looks happy with its {clothing}.', mood='😊')
-        ])
-
-    dress_pet = item_action('🧢')(_dress_pet)
-    _dress_pet_sun_hat = item_action('👒')(_dress_pet)
-    _dress_pet_headphones = item_action('🎧')(_dress_pet)
-    _dress_pet_glasses = item_action('👓')(_dress_pet)
-    _dress_pet_sunglasses = item_action('🕶️')(_dress_pet)
-    _dress_pet_goggles = item_action('🥽')(_dress_pet)
-    _dress_pet_scarf = item_action('🧣')(_dress_pet)
-    _dress_pet_ribbon = item_action('🎀')(_dress_pet)
-    _dress_pet_ring = item_action('💍')(_dress_pet)
-
     @item_action('🧭')
     async def hike(self, space: Space, *args: str) -> str:
         mode = HikeMode(await space.hike())
@@ -392,43 +369,144 @@ class MainMode(Mode):
     _try_hike_tree_b = action('🌳')(_try_hike)
     _try_hike_destination = action('📍')(_try_hike)
 
-    @entity_action('🪃')
-    async def view_boomerang(self, space: Space, entity: Furniture, *args: str) -> str:
+    @item_action('👋')
+    async def touch_pet(self, space: Space, *args: str) -> str:
+        pet = await space.get_pet()
+        await pet.touch()
+
+        if not space.pet_hatched:
+            return (f'🥚 Crack! {space.pet_name} 🐕 hatched from the egg. It looks around '
+                    'curiously. 😊')
+        if space.pet_nutrition <= 0:
+            return pet_message(pet, f'{space.pet_name} looks hungry.', focus='🍽️')
+        if pet.dirt >= pet.DIRT_MAX:
+            return pet_message(pet, f'{space.pet_name} is pretty dirty.', focus='💩')
+
+        activity = await space.get_pet_activity()
+        activity_type = activity.type if isinstance(activity, Furniture) else activity
+        try:
+            func = self._ACTIVITY_MESSAGES[activity_type]
+        except KeyError:
+            return random.choice([
+                pet_message(pet, f'{space.pet_name} wags its tail.'), pet_message(pet, speak())])
+        else:
+            return await func(self, space, activity)
+
+    @item_action('🥕')
+    async def feed_pet(self, space: Space, *args: str) -> str:
+        pet = await space.get_pet()
+        try:
+            await pet.feed()
+            # TODO multiple?
+            return pet_message(pet, f'{space.pet_name} enjoys its veggies.', focus='🥕', mood='😊')
+        except ValueError as e:
+            if 'pet_nutrition' in str(e):
+                return pet_message(pet, f'{space.pet_name} seems full and ignores the veggies 🥕.')
+            raise
+
+    @item_action('🧽')
+    async def wash_pet(self, space: Space, *args: str) -> str:
+        pet = await space.get_pet()
+        try:
+            await pet.wash()
+        except ValueError:
+            return pet_message(pet, f'{space.pet_name} is clean and politely refuses.')
+        # TODO multiple?
+        return pet_message(pet, f'{space.pet_name} waits patiently while you scrub it clean.',
+                           focus='🧽', mood='😊')
+
+    async def _dress_pet(self, space: Space, *args: str) -> str:
+        clothing = normalize_emoji(args[0])
+        pet = await space.get_pet()
+
+        if pet.clothing == clothing:
+            await pet.dress(None)
+            # TODO multiple?
+            return pet_message(await space.get_pet(),
+                               f"{space.pet_name} let's you take off the {clothing}.", mood='😊')
+
+        await pet.dress(clothing)
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} looks very pretty.', mood='😊'),
+            pet_message(pet, f'{space.pet_name} looks happy with its {clothing}.', mood='😊')
+        ])
+
+    dress_pet = item_action('🧢')(_dress_pet)
+    _dress_pet_sun_hat = item_action('👒')(_dress_pet)
+    _dress_pet_headphones = item_action('🎧')(_dress_pet)
+    _dress_pet_glasses = item_action('👓')(_dress_pet)
+    _dress_pet_sunglasses = item_action('🕶️')(_dress_pet)
+    _dress_pet_goggles = item_action('🥽')(_dress_pet)
+    _dress_pet_scarf = item_action('🧣')(_dress_pet)
+    _dress_pet_ribbon = item_action('🎀')(_dress_pet)
+    _dress_pet_ring = item_action('💍')(_dress_pet)
+
+    @item_action('✂️')
+    async def shear_pet(self, space: Space, *args: str) -> str:
+        pet = await space.get_pet()
+        wool = await pet.shear()
+        if not wool:
+            return pet_message(pet, f'{space.pet_name} is reluctant. Maybe try again later?')
+        return pet_message(pet, f"You gently cut {''.join(wool)} from {space.pet_name}.",
+                           focus='✂️', mood='😊')
+
+    @item_action('✏️')
+    async def change_name_of_pet(self, space: Space, *args: str) -> str:
+        try:
+            name = args[1]
+        except IndexError:
+            name = None
+        if not name or isemoji(name):
+            return dedent(f"""\
+                ✏️ ⬜Name
+                Change the name of {space.pet_name}.
+            """)
+
+        pet = await space.get_pet()
+        await pet.change_name(name)
+        space = await space.get()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} looks happy with its new name.', focus='✏️',
+                        mood='😊'),
+            pet_message(pet, f'{space.pet_name} approves its new name.', focus='✏️', mood='😊')
+        ])
+
+    @furniture_action('🪃')
+    async def view_boomerang(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice(['🪃 Good quality!', '🪃 Beautiful!'])
 
-    @entity_action('⚾')
-    async def view_ball(self, space: Space, entity: Furniture, *args: str) -> str:
+    @furniture_action('⚾')
+    async def view_ball(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice(['⚾ Good quality!', '⚾ Beautiful!'])
 
-    @entity_action('🧸')
-    async def view_teddy(self, space: Space, entity: Furniture, *args: str) -> str:
+    @furniture_action('🧸')
+    async def view_teddy(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice(['🧸 Good quality!', '🧸 Beautiful!'])
 
-    @entity_action('🛋️')
-    async def view_couch(self, space: Space, entity: Furniture, *args: str) -> str:
+    @furniture_action('🛋️')
+    async def view_couch(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice(['🛋️ Good quality!', '🛋️ Beautiful!'])
 
-    @entity_action('🪴')
-    async def view_plant(self, space: Space, entity: Furniture, *args: str) -> str:
-        assert isinstance(entity, Houseplant)
-        return random.choice([f'{entity.state} Good quality!', f'{entity.state} Beautiful!'])
+    @furniture_action('🪴')
+    async def view_houseplant(self, space: Space, piece: Furniture, *args: str) -> str:
+        return random.choice([f'{piece} Good quality!', f'{piece} Beautiful!'])
 
-    @entity_action('⛲')
-    async def view_fountain(self, space: Space, entity: Furniture, *args: str) -> str:
+    @furniture_action('⛲')
+    async def view_fountain(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice(['⛲ Good quality!', '⛲ Beautiful!'])
 
-    @entity_action('📺')
-    async def view_television(self, space: Space, entity: Furniture, *args: str) -> str:
+    @furniture_action('📺')
+    async def view_television(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice(['📺 Good quality!', '📺 Beautiful!'])
 
-    @entity_action('🗞️')
-    async def view_newspaper(self, space: Space, entity: Furniture, *args: str) -> str:
+    @furniture_action('🗞️')
+    async def view_newspaper(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice(['🗞️ Good quality!', '🗞️ Beautiful!'])
 
-    @entity_action('🎨')
-    async def view_palette(self, space: Space, entity: Furniture, *args: str) -> str:
-        assert isinstance(entity, Palette)
-        return random.choice([f'{entity.state} Good quality!', f'{entity.state} Beautiful!'])
+    @furniture_action('🎨')
+    async def view_palette(self, space: Space, piece: Furniture, *args: str) -> str:
+        return random.choice([f'{piece} Good quality!', f'{piece} Beautiful!'])
 
     @action('👻')
     async def talk_to_character(self, space: Space, *args: str) -> str:
@@ -447,78 +525,113 @@ class MainMode(Mode):
             text = text.replace('{items}', ''.join(message.request))
         return f'{avatar} {text}'
 
-    # /clean
-
-    @item_action('👋')
-    async def touch(self, space: Space, *args: str) -> str:
-        pet = await space.get_pet()
-        await pet.touch()
-        if not space.pet_hatched:
-            return f'🥚 Crack! 🐕 {space.pet_name} hatched from the egg. It looks around curiously. 😊'
-        if space.pet_nutrition == 0:
-            return pet_message(pet, f'{space.pet_name} looks hungry.', focus='🍽️')
-        pet = await space.get_pet()
-        if pet.dirt == pet.DIRT_MAX:
-            return pet_message(pet, f'{space.pet_name} is pretty dirty.', focus='💩')
-        activity = await space.get_pet_activity()
-        if activity == '':
-            return pet_message(pet, random.choice([f'{space.pet_name} wags its tail.', say(1)]))
-        symbol = activity.type if isinstance(activity, Furniture) else activity
-        # f = context.bot.get().activities[symbol]
-        f = _ACTIVITY_MESSAGES[symbol]
-        return await f(space, activity)
-
-    @item_action('🥕')
-    async def feed_pet(self, space: Space, *args: str) -> str:
-        pet = await space.get_pet()
-        try:
-            await pet.feed()
-            return pet_message(pet, f'{space.pet_name} enjoys its veggies.', focus='🥕', mood='😊')
-        except ValueError as e:
-            #if 'resources' in str(e):
-            #    return 'You do not have any 🥕 at the moment.'
-            if 'pet_nutrition' in str(e):
-                return pet_message(pet, f'{space.pet_name} seems full and ignores the 🥕.')
-            raise
-
-    @item_action('🧽')
-    async def wash_pet(self, space: Space, *args: str) -> str:
-        pet = await space.get_pet()
-        try:
-            await pet.wash()
-        except ValueError:
-            return pet_message(pet, f'{space.pet_name} is clean and politely refuses.')
-        return pet_message(pet, f'{space.pet_name} waits patiently while you scrub it clean.',
-                           focus='🧽', mood='😊')
-
-    @item_action('✂️')
-    async def shear_pet(self, space: Space, *args: str) -> str:
-        pet = await space.get_pet()
-        wool = await pet.shear()
-        if wool:
-            return f"✂️ You gently cut {''.join(wool)} from {space.pet_name}. 😊"
-        return f'✂️ {space.pet_name} seems reluctant. Maybe try again later?'
-
-    @item_action('✏️')
-    async def change_pet_name(self, space: Space, *args: str) -> str:
-        if not (len(args) == 2 and not isemoji(args[1])):
-            return dedent(f"""\
-                ✏️ ⬜Name
-                Change the name of {space.pet_name}.
-            """)
-        pet = await space.get_pet()
-        await pet.change_name(args[1])
-        space = await space.get()
-        return random.choice([
-            pet_message(pet, f'{space.pet_name} looks happy with its new name.', focus='✏️', mood='😊'),
-            pet_message(pet, f'{space.pet_name} approves its new name.', focus='✏️', mood='😊')
-        ])
-
+    # TODO
     async def default(self, space: Space, *args: str) -> str:
         word = normalize_emoji(args[0]) if isemoji(args[0]) else f'“{args[0]}”'
         return f'You have no {word} at the moment. Maybe have a look in the tent ⛺?'
 
-# clean
+    async def _sleep_message(self, space: Space, activity: Furniture | str) -> str:
+        assert isinstance(activity, str)
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} is taking a nap.', focus=activity),
+            pet_message(pet, f'{space.pet_name} is snoring to itself.', focus=activity)
+        ])
+
+    async def _leaves_message(self, space: Space, activity: Furniture | str) -> str:
+        assert isinstance(activity, str)
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} is chasing after some leaves. {speak()}',
+                        focus=activity),
+            pet_message(pet, f'{space.pet_name} is playing outdoors.', focus=activity)
+        ])
+
+    async def _boomerang_message(self, space: Space, activity: Furniture | str) -> str:
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} is fetching the boomerang. {speak()}',
+                        focus=str(activity)),
+            pet_message(pet, f'{space.pet_name} is carrying the boomerang around.',
+                        focus=str(activity))
+        ])
+
+    async def _ball_message(self, space: Space, activity: Furniture | str) -> str:
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} is playing with the ball. {speak()}',
+                        focus=str(activity)),
+            pet_message(pet, f'{space.pet_name} is occupied with the ball.', focus=str(activity))
+        ])
+
+    async def _teddy_message(self, space: Space, activity: Furniture | str) -> str:
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} is cuddling with its teddy.', focus=str(activity)),
+            pet_message(pet, f'{space.pet_name} is guarding its teddy.', focus=str(activity))
+        ])
+
+    async def _couch_message(self, space: Space, activity: Furniture | str) -> str:
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} is relaxing on the couch.', focus=str(activity)),
+            pet_message(pet, f'{space.pet_name} is briefly resting its eyes.', focus=str(activity))
+        ])
+
+    async def _houseplant_message(self, space: Space, activity: Furniture | str) -> str:
+        assert isinstance(activity, Houseplant)
+        pet = await space.get_pet()
+        if activity.state == '🌺':
+            text = f'{space.pet_name} is smelling the fresh blossoms.'
+        else:
+            text = f'{space.pet_name} is carefully watering the houseplant.'
+        return pet_message(pet, text, focus=str(activity))
+
+    async def _fountain_message(self, space: Space, activity: Furniture | str) -> str:
+        pet = await space.get_pet()
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} is splashing around in the fountain. {speak()}',
+                        focus=str(activity)),
+            pet_message(pet, f'{space.pet_name} is dipping its toes in the water.',
+                        focus=str(activity))
+        ])
+
+    async def _television_message(self, space: Space, activity: Furniture | str) -> str:
+        assert isinstance(activity, Television)
+        pet = await space.get_pet()
+        return pet_message(pet, f'{space.pet_name} is hooked by {activity.show}.',
+                           focus=str(activity))
+
+    async def _newspaper_message(self, space: Space, activity: Furniture | str) -> str:
+        assert isinstance(activity, Newspaper)
+        pet = await space.get_pet()
+        period = '' if unicodedata.category(activity.article[-1]).startswith('P') else '.'
+        return pet_message(
+            pet, f'{space.pet_name} is reading an article. {activity.article}{period}',
+            focus=str(activity))
+
+    async def _palette_message(self, space: Space, activity: Furniture | str) -> str:
+        assert isinstance(activity, Palette)
+        pet = await space.get_pet()
+        if activity.state == '🖼️':
+            text = f'{space.pet_name} looks very content with its painting.'
+        else:
+            text = f'{space.pet_name} is painting something with passion.'
+        return pet_message(pet, text, focus=str(activity))
+
+    _ACTIVITY_MESSAGES: dict[str, Callable[[MainMode, Space, Furniture | str], Awaitable[str]]] = {
+        '💤': _sleep_message,
+        '🍃': _leaves_message,
+        '🪃': _boomerang_message,
+        '⚾': _ball_message,
+        '🧸': _teddy_message,
+        '🛋️': _couch_message,
+        '🪴': _houseplant_message,
+        '⛲': _fountain_message,
+        '📺': _television_message,
+        '🗞️': _newspaper_message,
+        '🎨': _palette_message
+    }
 
 class HikeMode(Mode):
     """Hike minigame chat mode.
@@ -605,107 +718,6 @@ class HikeMode(Mode):
             🔙: Return home.
         """)
 
-# /clean
-
-# Style guide: TODO. feelings described from oustide, e.g. looks hungry instead of is hungry. exceptions
-# for simplicity for describing verbs, e.g. drawing passionetly or if it is a verb e.g. likes
-
-def say(n: int = 0) -> str:
-    s = ' '.join([random.choice(['Woof!', 'Arf!']) for _ in range(randint(n, 2))])
-    return s
-    # return f'”{s}”' if s else ''
-
-async def view_sleep(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, str)
-    pet = await space.get_pet()
-    text = random.choice(
-        [f'{space.pet_name} is taking a nap.', f'{space.pet_name} is snoring to itself.'])
-    return pet_message(pet, text, focus=activity)
-
-async def view_leaves(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, str)
-    pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} is chasing after some leaves. {say()}',
-                       focus=activity)
-
-async def view_boomerang(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Furniture)
-    pet = await space.get_pet()
-    text = random.choice([
-        f'{space.pet_name} is fetching the boomerang. {say()}',
-        f'{space.pet_name} is throwing the boomerang far.'
-    ])
-    return pet_message(pet, text, focus=activity.type)
-
-async def view_ball(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Furniture)
-    pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} is playing with the ball. {say()}',
-                       focus=activity.type)
-
-async def view_teddy(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Furniture)
-    pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} is cuddling with its teddy.', focus=activity.type)
-
-async def view_couch(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Furniture)
-    pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} is relaxing on the couch.', focus=activity.type)
-
-async def view_plant(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, HousePlant)
-    pet = await space.get_pet()
-    if activity.state == '🌺':
-        text = f'{space.pet_name} is smelling the fresh blossoms.'
-    else:
-        text = f'{space.pet_name} is carefully watering the plant.'
-    return pet_message(pet, text, focus=activity.state)
-
-async def view_fountain(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Furniture)
-    pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} is splashing around in the fountain. {say()}',
-                       focus=activity.type) # 💦
-
-async def view_television(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Television)
-    pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} seems hooked by {activity.show}.',
-                       focus=activity.type)
-
-async def view_newspaper(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Newspaper)
-    pet = await space.get_pet()
-    dot = '' if unicodedata.category(activity.article[-1]).startswith('P') else '.'
-    return pet_message(pet, f'{space.pet_name} is reading an article. {activity.article}{dot}',
-                       focus=activity.type)
-
-async def view_palette(space: Space, activity: Furniture | str) -> str:
-    assert isinstance(activity, Palette)
-    pet = await space.get_pet()
-    if activity.state == '🖼️':
-        text = f'{space.pet_name} seems very content with its painting.'
-    else:
-        text = f'{space.pet_name} is painting something with passion.'
-    return pet_message(pet, text, focus=activity.state)
-
-#self.activities: dict[str, Callable[[Space, Object | str], Awaitable[str]]] = {
-#self.activities = {
-_ACTIVITY_MESSAGES: dict[str, Callable[[Space, Furniture | str], Awaitable[str]]] = {
-    '💤': view_sleep,
-    '🍃': view_leaves,
-    '🪃': view_boomerang,
-    '⚾': view_ball,
-    '🧸': view_teddy,
-    '🛋️': view_couch,
-    '🪴': view_plant,
-    '⛲': view_fountain,
-    '📺': view_television,
-    '🗞️': view_newspaper,
-    '🎨': view_palette
-}
-
 #class listener:
 #    def __init__(self, arg: ListenerFunction | ) -> None:
 #        self.event_type = event_type
@@ -762,6 +774,7 @@ _ACTIVITY_MESSAGES: dict[str, Callable[[Space, Furniture | str], Awaitable[str]]
 #
 #action = ActionFunc.decorator
 
+# TODO (also move to top)
 class EventMessageFunc:
     """Write a message about an event in *space*.
 
@@ -781,6 +794,7 @@ class EventMessageFunc:
     async def __call__(self, space: Space) -> str:
         return await self.func(space)
 
+# TODO
 def event_message(
     event_type: str
 ) -> Callable[[Callable[[Space], Awaitable[str]]], EventMessageFunc]:
@@ -807,17 +821,17 @@ def event_message(
 #        return Sub()
 #    return wrap
 
+# TODO
 @event_message('pet-hungry')
 async def pet_hungry_message(space: Space) -> str:
     pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} looks hungry. {say()}', focus='🍽️')
+    return pet_message(pet, f'{space.pet_name} looks hungry. {speak()}', focus='🍽️')
 
+# TODO
 @event_message('pet-dirty')
 async def pet_dirty_message(space: Space) -> str:
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} is pretty dirty.', focus='💩')
-
-# clean
 
 @event_message('space-explain-touch')
 async def space_explain_touch_message(space: Space) -> str:
@@ -844,16 +858,16 @@ async def space_explain_basics_message(space: Space) -> str:
 @event_message('space-visit-ghost')
 async def space_visit_ghost_message(space: Space) -> str:
     pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} has seen a ghost. {say()}', focus='👻', mood='😮')
+    return pet_message(pet, f'{space.pet_name} has seen a ghost. {speak()}', focus='👻', mood='😮')
 
-# /clean
-
+# TODO
 @event_message('space-stroll-compass-blueprint')
 async def space_stroll_compass_blueprint_message(space: Space) -> str:
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} was digging and found a compass blueprint.', focus='📋',
                        mood='😊')
 
+# TODO
 @event_message('space-stroll-sponge')
 async def space_stroll_sponge_message(space: Space) -> str:
     pet = await space.get_pet()

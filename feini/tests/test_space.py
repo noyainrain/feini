@@ -14,16 +14,12 @@
 
 # pylint: disable=missing-docstring
 
-# /clean
-
 from itertools import cycle, islice
 
-from feini.context import bot
 from feini.furniture import Houseplant, FURNITURE_MATERIAL
 from feini.space import Hike, Pet, Space
+from feini.stories import SewingStory
 from .test_bot import TestCase
-
-# clean
 
 class SpaceTest(TestCase):
     async def test_tick(self) -> None:
@@ -68,48 +64,45 @@ class SpaceTest(TestCase):
         self.assertFalse(wood)
 
     async def test_craft(self) -> None:
-        await self.space.obtain(*Space.TOOL_MATERIAL['🪓'])
+        await self.space.obtain(*Space.TOOL_MATERIAL['🪓'], '🥕')
         axe = await self.space.craft('🪓')
         space = await self.space.get()
         self.assertEqual(axe, '🪓')
         self.assertEqual(space.tools, [*self.space.tools, '🪓']) # type: ignore[misc]
-        self.assertFalse(space.items)
+        self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
 
     async def test_craft_furniture_item(self) -> None:
-        await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
+        await self.space.obtain(*FURNITURE_MATERIAL['🪴'], '🥕')
         plant = await self.space.craft('🪴')
         space = await self.space.get()
         assert isinstance(plant, Houseplant)
         self.assertEqual(await space.get_furniture(), [plant]) # type: ignore[misc]
         self.assertEqual(await self.bot.get_furniture_item(plant.id), plant)
-        self.assertFalse(space.items)
+        self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
 
     async def test_craft_unknown_blueprint(self) -> None:
         with self.assertRaisesRegex(ValueError, 'blueprint'):
             await self.space.craft('🪡')
 
-    async def test_craft_no_resources(self) -> None:
+    async def test_craft_no_material(self) -> None:
         with self.assertRaisesRegex(ValueError, 'items'):
             await self.space.craft('🪴')
 
     async def test_sew(self) -> None:
-        await self.space.obtain('🪡', *Space.CLOTHING_MATERIAL['🎀'])
+        await self.space.obtain('🪡', *Space.CLOTHING_MATERIAL['🎀'], '🥕')
         ribbon = await self.space.sew('🎀')
         space = await self.space.get()
         self.assertEqual(ribbon, '🎀')
-        self.assertEqual(space.items, ['🎀']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🥕', '🎀']) # type: ignore[misc]
 
-    async def test_sew_no_resources(self) -> None:
+    async def test_sew_no_material(self) -> None:
         await self.space.obtain('🪡')
         with self.assertRaisesRegex(ValueError, 'items'):
             await self.space.sew('🎀')
 
-    # /clean
-
 class PetTest(TestCase):
     TRIALS = 1000
 
-    # TODO
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         self.pet = await self.space.get_pet()
@@ -157,7 +150,7 @@ class PetTest(TestCase):
     async def test_wash(self) -> None:
         await self.pet.wash()
         pet = await self.pet.get()
-        self.assertFalse(pet.dirt)
+        self.assertEqual(pet.dirt, 0)
 
     async def test_wash_clean_pet(self) -> None:
         await self.pet.wash()
@@ -165,21 +158,21 @@ class PetTest(TestCase):
             await self.pet.wash()
 
     async def test_dress(self) -> None:
-        await self.space.obtain('🎀')
+        await self.space.obtain('🎀', '🥕')
         await self.pet.dress('🎀')
-        space = await self.space.get()
         pet = await self.pet.get()
+        space = await self.space.get()
         self.assertEqual(pet.clothing, '🎀')
-        self.assertFalse(space.items)
+        self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
 
     async def test_dress_no_clothing(self) -> None:
-        await self.space.obtain('🎀')
+        await self.space.obtain('🎀', '🥕')
         await self.pet.dress('🎀')
         await self.pet.dress(None)
-        space = await self.space.get()
         pet = await self.pet.get()
+        space = await self.space.get()
         self.assertIsNone(pet.clothing)
-        self.assertEqual(space.items, ['🎀']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🥕', '🎀']) # type: ignore[misc]
 
     async def test_shear(self) -> None:
         await self.space.obtain('✂️', '🥕')
@@ -201,11 +194,44 @@ class PetTest(TestCase):
         space = await self.space.get()
         self.assertEqual(space.pet_name, 'Frank')
 
+class CharacterTest(TestCase):
+    async def test_talk(self) -> None:
+        story = next(story
+                     for story in await self.space.get_stories() if isinstance(story, SewingStory))
+        await self.space.obtain('✂️', '🥕')
+        await story.tell()
+        self.bot.time += 2
+        await story.tell()
+        character = next(iter(await self.space.get_characters()))
+
+        message = await character.talk()
+        dialogue = await character.get_dialogue()
+        self.assertEqual(message.id, 'ghost-sewing-hello')
+        self.assertEqual(dialogue[0], message)
+
+        await character.talk()
+        await character.talk()
+        message = await character.talk()
+        space = await self.space.get()
+        self.assertEqual(message.id, 'ghost-sewing-request')
+        self.assertFalse(message.taken)
+        self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
+
+        await space.obtain('🧶', '🧶', '🧶')
+        message = await character.talk()
+        space = await self.space.get()
+        self.assertEqual(message.id, 'ghost-sewing-blueprint')
+        self.assertEqual(message.taken, ['🧶', '🧶', '🧶']) # type: ignore[misc]
+        self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
+
+        await character.talk()
+        message = await character.talk()
+        self.assertEqual(message.id, 'ghost-sewing-goodbye')
+
 class HikeTest(TestCase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
-        await self.space.obtain(*Space.TOOL_MATERIAL['🧭'])
-        await self.space.craft('🧭')
+        await self.space.obtain('🧭')
         self.hike = await self.space.hike()
 
     @staticmethod
@@ -245,5 +271,3 @@ class HikeTest(TestCase):
     async def test_move_bad_directions_length(self) -> None:
         with self.assertRaisesRegex(ValueError, 'directions'):
             await self.hike.move([])
-
-# /clean

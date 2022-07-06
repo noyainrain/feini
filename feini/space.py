@@ -280,7 +280,7 @@ class Space(Entity):
         items = tuple(item for item in items if item not in self.ITEM_CATEGORIES['tool'])
         async with bot.redis.pipeline() as pipe:
             await pipe.watch(self.id)
-            values = await pipe.hmget(self.id, 'resources', 'tools', 'oink')
+            values = await pipe.hmget(self.id, 'resources', 'tools')
             stock = (values[0] or '').split()
             tools_stock = (values[1] or '').split()
             pipe.multi()
@@ -447,7 +447,6 @@ class Space(Entity):
             except ReferenceError:
                 pass
 
-# TODO
 class Pet(Entity):
     """Pet.
 
