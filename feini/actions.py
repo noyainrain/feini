@@ -146,6 +146,31 @@ def furniture_action(furniture_type: str) -> Callable[[_FurnitureActionCallable]
         return Action(wrapper, name=furniture_type)
     return decorator
 
+class EventMessageFunc:
+    """Write a message about an event in *space*.
+
+    .. attribute:: func
+
+       Annotated function.
+
+    .. attribute:: event_type
+
+       Type of event handled by the function.
+    """
+
+    def __init__(self, func: Callable[[Space], Awaitable[str]], event_type: str) -> None:
+        self.func = func
+        self.event_type = event_type
+
+    async def __call__(self, space: Space) -> str:
+        return await self.func(space)
+
+def event_message(
+    event_type: str
+) -> Callable[[Callable[[Space], Awaitable[str]]], EventMessageFunc]:
+    """Decorator to define an event message function about *event_type* events."""
+    return partial(EventMessageFunc, event_type=event_type)
+
 _EMOJI_VARIANTS = {
     '🪨': ['🧱'],
     '🧶': ['🧵', '🪢'],
@@ -262,21 +287,21 @@ class MainMode(Mode):
                     Obtain some items ({''.join(items)}).
                 """)
             raise
-        return 'You stocked up. 😅'
+        return 'You stock up. 😅'
 
     @item_action('🧺')
     async def gather(self, space: Space, *args: str) -> str:
         resources = await space.gather()
         if not resources:
             return 'The meadow is empty. Maybe try again later?'
-        return f"🧺 You gathered {''.join(resources)} from the meadow. 😊"
+        return f"🧺 You gather {''.join(resources)} from the meadow. 😊"
 
     @item_action('🪓')
     async def chop_wood(self, space: Space, *args: str) -> str:
         wood = await space.chop_wood()
         if not wood:
             return 'There are no more logs in the woods. Maybe try again later?'
-        return f"🪓 You chopped {''.join(wood)} from the woods. 😊"
+        return f"🪓 You chop {''.join(wood)} from the woods. 😊"
 
     @item_action('🔨')
     async def craft(self, space: Space, *args: str) -> str:
@@ -289,7 +314,7 @@ class MainMode(Mode):
 
         try:
             await space.craft(blueprint)
-            return f'🔨 You spent {material} to craft a new {blueprint}. 🥳'
+            return f'🔨 You spend {material} to craft a new {blueprint}. 🥳'
 
         except ValueError as e:
             if 'blueprint' in str(e):
@@ -343,7 +368,7 @@ class MainMode(Mode):
 
         try:
             await space.sew(pattern)
-            return f'🪡 You spent {material} to sew a new {pattern}. 🥳'
+            return f'🪡 You spend {material} to sew a new {pattern}. 🥳'
         except ValueError as e:
             if 'resources' in str(e):
                 return f'You need {material} to sew a {pattern}.'
@@ -397,12 +422,14 @@ class MainMode(Mode):
         pet = await space.get_pet()
         try:
             await pet.feed()
-            # TODO multiple?
-            return pet_message(pet, f'{space.pet_name} enjoys its veggies.', focus='🥕', mood='😊')
         except ValueError as e:
             if 'pet_nutrition' in str(e):
                 return pet_message(pet, f'{space.pet_name} seems full and ignores the veggies 🥕.')
             raise
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} enjoys its veggies.', focus='🥕', mood='😊'),
+            pet_message(pet, f'{space.pet_name} digs in.', focus='🥕', mood='😊')
+        ])
 
     @item_action('🧽')
     async def wash_pet(self, space: Space, *args: str) -> str:
@@ -411,9 +438,11 @@ class MainMode(Mode):
             await pet.wash()
         except ValueError:
             return pet_message(pet, f'{space.pet_name} is clean and politely refuses.')
-        # TODO multiple?
-        return pet_message(pet, f'{space.pet_name} waits patiently while you scrub it clean.',
-                           focus='🧽', mood='😊')
+        return random.choice([
+            pet_message(pet, f'{space.pet_name} waits patiently while you scrub it clean.',
+                        focus='🧽', mood='😊'),
+            pet_message(pet, f'You wash {space.pet_name} thoroughly.', focus='🧽', mood='😊')
+        ])
 
     async def _dress_pet(self, space: Space, *args: str) -> str:
         clothing = normalize_emoji(args[0])
@@ -421,9 +450,9 @@ class MainMode(Mode):
 
         if pet.clothing == clothing:
             await pet.dress(None)
-            # TODO multiple?
-            return pet_message(await space.get_pet(),
-                               f"{space.pet_name} let's you take off the {clothing}.", mood='😊')
+            pet = await space.get_pet()
+            return pet_message(pet, f"{space.pet_name} lets you take off the {clothing}.",
+                               mood='😊')
 
         await pet.dress(clothing)
         pet = await space.get_pet()
@@ -525,10 +554,11 @@ class MainMode(Mode):
             text = text.replace('{items}', ''.join(message.request))
         return f'{avatar} {text}'
 
-    # TODO
     async def default(self, space: Space, *args: str) -> str:
-        word = normalize_emoji(args[0]) if isemoji(args[0]) else f'“{args[0]}”'
-        return f'You have no {word} at the moment. Maybe have a look in the tent ⛺?'
+        word = normalize_emoji(args[0])
+        if not isemoji(word):
+            word = f'“{word}”'
+        return f'You have no {word} at the moment. You can see your inventory in the tent ⛺.'
 
     async def _sleep_message(self, space: Space, activity: Furniture | str) -> str:
         assert isinstance(activity, str)
@@ -706,7 +736,7 @@ class HikeMode(Mode):
         pet = await space.get_pet()
         moves = len(self.hike.moves)
         text = ngettext(
-            'You returned home after 1 move.', 'You returned home after {moves} moves.', moves
+            'You return home after 1 move.', 'You return home after {moves} moves.', moves
         ).format(moves=moves)
         return f'{pet} {text}\n\n{self.hike}'
 
@@ -718,116 +748,11 @@ class HikeMode(Mode):
             🔙: Return home.
         """)
 
-#class listener:
-#    def __init__(self, arg: ListenerFunction | ) -> None:
-#        self.event_type = event_type
-#        self.f = f
-#
-#    @overload
-#    def __call__(self, space: Space, /) -> Awaitable[str]:
-#        pass
-#    @overload
-#    def __call__(self, f: ListenerFunction, /) -> listener:
-#        pass
-#    def __call__(self, arg: Space | ListenerFunction, /) -> Awaitable[str] | listener:
-#        if isinstance(arg, Space):
-#            return self.f(arg)
-#        else:
-#            return listener(self.event_type, arg)
-
-#class eventmessage:
-#    @overload
-#    def __new__(cls, f: Callable[[Space], Awaitable[str]], /) -> eventmessage:
-#        pass
-#    @overload
-#    def __new__(cls, event_type: str, /) -> Callable[[Callable[[Space], Awaitable[str]]], eventmessage]:
-#        pass
-#    def __new__(cls, arg: Callable[[Space], Awaitable[str]] | str) -> eventmessage | Callable[[Callable[[Space], Awaitable[str]]], eventmessage]:
-#        pass
-
-# @subscriber('space-pet-is-hungry')
-# @subscriber('space-update')
-
-#from typing import TypeVar, Generic
-#from types import FunctionType
-#
-#_T = TypeVar('_T')
-#_C = TypeVar('_C', bound=Callable[[Space, str], object])
-#
-#class AnnotatedFunc(Generic[_C]):
-#    __call__: _C
-#
-#    def __init__(self, f: _C) -> None:
-#        self._f = f
-#
-#    def __call__(self, *args: object, **kwargs: object) -> object: # type: ignore[no-redef]
-#        return self._f(*args, **kwargs) # type: ignore[misc]
-#
-#    @classmethod
-#    def decorator(cls: _T) -> Callable[[_C], _T]:
-#        pass
-#
-#class ActionFunc(AnnotatedFunc[Callable[[Space, str], Awaitable[str]]]):
-#    def __init__(self, f: Callable[[Space, str], Awaitable[str]], *, action: str) -> None:
-#        super().__init__(f)
-#        self.action = action
-#
-#action = ActionFunc.decorator
-
-# TODO (also move to top)
-class EventMessageFunc:
-    """Write a message about an event in *space*.
-
-    .. attribute:: func
-
-       Wrapped function.
-
-    .. attribute:: event_type
-
-       Type of event the function handles.
-    """
-
-    def __init__(self, func: Callable[[Space], Awaitable[str]], event_type: str) -> None:
-        self.func = func
-        self.event_type = event_type
-
-    async def __call__(self, space: Space) -> str:
-        return await self.func(space)
-
-# TODO
-def event_message(
-    event_type: str
-) -> Callable[[Callable[[Space], Awaitable[str]]], EventMessageFunc]:
-    """Decorator to define an event message function that handles *event_type* events."""
-    return partial(EventMessageFunc, event_type=event_type)
-
-#from typing import ClassVar
-#
-#class EventMessageFunc:
-#    event_type: ClassVar[str]
-#
-#    async def __call__(self, space: Space) -> str:
-#        raise NotImplementedError()
-#
-#def eventmessage(
-#    event_type: str
-#) -> Callable[[Callable[[Space], Awaitable[str]]], EventMessageFunc]:
-#    def wrap(f: Callable[[Space], Awaitable[str]]) -> EventMessageFunc:
-#        class Sub(EventMessageFunc):
-#            event_type = event_type
-#
-#            async def __call__(self, space: Space) -> str:
-#                return await f(space)
-#        return Sub()
-#    return wrap
-
-# TODO
 @event_message('pet-hungry')
 async def pet_hungry_message(space: Space) -> str:
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} looks hungry. {speak()}', focus='🍽️')
 
-# TODO
 @event_message('pet-dirty')
 async def pet_dirty_message(space: Space) -> str:
     pet = await space.get_pet()
@@ -860,15 +785,14 @@ async def space_visit_ghost_message(space: Space) -> str:
     pet = await space.get_pet()
     return pet_message(pet, f'{space.pet_name} has seen a ghost. {speak()}', focus='👻', mood='😮')
 
-# TODO
 @event_message('space-stroll-compass-blueprint')
 async def space_stroll_compass_blueprint_message(space: Space) -> str:
     pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} was digging and found a compass blueprint.', focus='📋',
-                       mood='😊')
+    return pet_message(pet, f'{space.pet_name} was digging and found a compass blueprint.',
+                       focus='📋', mood='😊')
 
-# TODO
 @event_message('space-stroll-sponge')
 async def space_stroll_sponge_message(space: Space) -> str:
     pet = await space.get_pet()
-    return pet_message(pet, f'{space.pet_name} found a sponge at the stream.', focus='🧽', mood='😊')
+    return pet_message(pet, f'{space.pet_name} found a sponge at the stream.', focus='🧽',
+                       mood='😊')

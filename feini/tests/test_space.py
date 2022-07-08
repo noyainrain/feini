@@ -196,8 +196,8 @@ class PetTest(TestCase):
 
 class CharacterTest(TestCase):
     async def test_talk(self) -> None:
-        story = next(story
-                     for story in await self.space.get_stories() if isinstance(story, SewingStory))
+        story = next(story for story in await self.space.get_stories()
+                     if isinstance(story, SewingStory))
         await self.space.obtain('✂️', '🥕')
         await story.tell()
         self.bot.time += 2

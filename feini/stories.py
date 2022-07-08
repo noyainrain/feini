@@ -16,7 +16,7 @@
 
 from . import context
 from .core import Entity
-from .space import Pet, Message, Space
+from .space import Message, Pet, Space
 from .util import randstr
 
 class Story(Entity):

@@ -57,14 +57,40 @@ class Test(TestCase):
         reply = await self.bot.perform('local', '✂️')
         self.assertIn('later', reply)
 
-        reply = await self.bot.perform('local', '✏️ Peter')
+        reply = await self.bot.perform('local', '✏️ Frank')
         self.assertEqual(reply[:3], '✏️🐕')
 
         # Play with furniture
-        await self.bot.perform('local', f"obtain {''.join(FURNITURE_MATERIAL['🪴'])}")
-        await self.bot.perform('local', '🔨🪴')
+        for piece, material in FURNITURE_MATERIAL.items():
+            await self.bot.perform('local', f"obtain {''.join(material)}")
+            await self.bot.perform('local', f'🔨{piece}')
+
+        reply = await self.bot.perform('local', '🪃')
+        self.assertEqual(reply[0], '🪃')
+
+        reply = await self.bot.perform('local', '⚾')
+        self.assertEqual(reply[0], '⚾')
+
+        reply = await self.bot.perform('local', '🧸')
+        self.assertEqual(reply[0], '🧸')
+
+        reply = await self.bot.perform('local', '🛋️')
+        self.assertEqual(reply[:2], '🛋️')
+
         reply = await self.bot.perform('local', '🪴')
         self.assertEqual(reply[0], '🪴')
+
+        reply = await self.bot.perform('local', '⛲')
+        self.assertEqual(reply[0], '⛲')
+
+        reply = await self.bot.perform('local', '📺')
+        self.assertEqual(reply[0], '📺')
+
+        reply = await self.bot.perform('local', '🗞️')
+        self.assertEqual(reply[:2], '🗞️')
+
+        reply = await self.bot.perform('local', '🎨')
+        self.assertEqual(reply[0], '🎨')
 
         # Play with character
         reply = await self.bot.perform('local', '👻')

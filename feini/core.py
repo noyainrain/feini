@@ -12,28 +12,26 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.
 # If not, see <https://www.gnu.org/licenses/>.
 
-"""TODO."""
+"""Core concepts."""
 
 from typing import TypeVar
 
 from . import context
 
-_S = TypeVar('_S', bound='Entity')
+_E = TypeVar('_E', bound='Entity')
 
 class Entity:
-    """TODO.
-
-    TODO eq/hash by ID
+    """Game entity.
 
     .. attribute:: id
 
-       Entity ID.
+       Unique entity ID.
     """
 
     def __init__(self, data: dict[str, str]) -> None:
         self.id = data['id']
 
-    async def get(self: _S) -> _S:
+    async def get(self: _E) -> _E:
         """Get a fresh copy of the entity."""
         data = await context.bot.get().redis.hgetall(self.id)
         if not data:
