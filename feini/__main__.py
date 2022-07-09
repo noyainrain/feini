@@ -17,6 +17,7 @@
 import asyncio
 from asyncio import CancelledError, Task, current_task, get_running_loop
 from configparser import ConfigParser
+from importlib import resources
 import logging
 import signal
 import sys
@@ -35,14 +36,16 @@ async def main() -> None:
                         level=logging.INFO)
 
     config = ConfigParser()
+    with resources.open_text('feini.res', 'default.ini') as f:
+        config.read_file(f)
     config.read('fe.ini')
-    redis_url = config.get('feini', 'redis_url', fallback='redis:')
+    redis_url = config.get('feini', 'redis_url')
     try:
-        debug = config.getboolean('feini', 'debug', fallback=False)
+        debug = config.getboolean('feini', 'debug')
     except ValueError:
         print('Configuration error: Bad [feini] debug type', file=sys.stderr)
         return
-    telegram_key = config.get('telegram', 'key', fallback=None)
+    telegram_key = config.get('telegram', 'key') or None
     try:
         bot = Bot(redis_url=redis_url, telegram_key=telegram_key, debug=debug)
     except ValueError:

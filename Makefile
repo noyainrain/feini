@@ -1,28 +1,22 @@
 PYTHON=python3
-PIP=pip
-NPM=npm
+PIP=pip3
 
 PIPFLAGS=$$([ -z "$$VIRTUAL_ENV" ] && echo --user) --upgrade
-NPMFLAGS=-C client --no-save --no-optional
 
 .PHONY: test
 test:
 	$(PYTHON) -m unittest
 
-.PHONY: watch-test
-watch-test:
-	trap "exit 0" INT; $(PYTHON) -m tornado.autoreload -m unittest
+.PHONY: type
+type:
+	mypy feini
 
 .PHONY: lint
 lint:
 	pylint -j 0 feini
 
-.PHONY: type
-type:
-	mypy feini
-
 .PHONY: check
-check: test test-ext test-ui lint
+check: type test lint
 
 .PHONY: deps
 deps:
@@ -32,36 +26,15 @@ deps:
 deps-dev:
 	$(PIP) install $(PIPFLAGS) -r requirements-dev.txt
 
-.PHONY: doc
-doc:
-	sphinx-build doc doc/build
-
-.PHONY: sample
-sample:
-	scripts/sample.py
-
-.PHONY: show-deprecated
-show-deprecated:
-	git grep -in -C1 deprecate $$(git describe --tags $$(git rev-list -1 --first-parent \
-	                                                     --until="6 months ago" master))
-
 .PHONY: release
 release:
 	scripts/release.sh
 
-.PHONY: micro-link
-micro-link:
-	$(PIP) install $(PIPFLAGS) -e "$(MICROPATH)"
-	@# Work around npm 7 uninstalling local dependencies if outside package (see
-	@# https://github.com/npm/cli/issues/2339)
-	rm -r client/node_modules/@noyainrain/micro
-	ln -sT "$(MICROPATH)/client" client/node_modules/@noyainrain/micro
-
 .PHONY: clean
 clean:
 	rm -rf $$(find . -name __pycache__) doc/build doc/micro
-	$(NPM) $(NPMFLAGS) run clean
 
+# TODO remove
 .PHONY: help
 help:
 	@echo "test:            Run all unit tests"
