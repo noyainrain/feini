@@ -1,6 +1,7 @@
-name: Code quality checks
-# TODO is this run on pull request also?
-on: push
+name: Check code
+on:
+    - push
+    - pull_request
 jobs:
     test:
         runs-on: ubuntu-latest
