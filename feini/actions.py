@@ -309,8 +309,7 @@ class MainMode(Mode):
             blueprint = normalize_emoji(args[1])
         except IndexError:
             blueprint = ''
-        material = ''.join(Space.TOOL_MATERIAL.get(blueprint) or FURNITURE_MATERIAL.get(blueprint)
-                           or '')
+        material = ''.join((Space.TOOL_MATERIAL | FURNITURE_MATERIAL).get(blueprint) or '')
 
         try:
             await space.craft(blueprint)

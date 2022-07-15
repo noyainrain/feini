@@ -11,9 +11,9 @@ Would you like to contribute to Open Feini? Awesome! 💖
 6. Run the code checks and fix any reported issues.
 5. [Create a pull request](https://github.com/noyainrain/feini/pulls).
 7. Your contribution is reviewed by a team member. Make the requested changes, if any.
-8. Your contribution is merged. 🥳
+8. Your contribution is merged by a team member. 🥳
 
-A good change description contains:
+A good issue description contains:
 
 * If the API is modified, any class or function signature
 * If the UI is modified, an outline of the text

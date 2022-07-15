@@ -23,10 +23,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from feini.space import Space
+from feini.furniture import FURNITURE_MATERIAL
 
 MATERIAL = (
-    {obj: material for obj, material in Space.COSTS.items() if obj not in {'🪓', '🪃'}} |
-    Space.CLOTHING_MATERIAL)
+    {tool: material for tool, material in Space.TOOL_MATERIAL.items() if tool != '🪓'} |
+    Space.CLOTHING_MATERIAL |
+    {piece: material for piece, material in FURNITURE_MATERIAL.items() if piece != '🪃'})
 INCOME = {'🪨': 1, '🪵': 1, '🧶': 1}
 TARGET_CRAFT_TIME = 2
 
