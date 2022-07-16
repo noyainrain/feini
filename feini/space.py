@@ -729,12 +729,12 @@ class Hike:
 
     .. attribute:: map
 
-       Grid of fields.
+       Tile map.
 
     .. attribute:: moves
 
        Moves the player made so far. A move is a list of steps, where each step is a direction
-       (➡️⬇️⬅️⬆️.) along with the encountered field.
+       (➡️⬇️⬅️⬆️.) along with the encountered tile.
 
     .. attribute:: resource
 
@@ -750,11 +750,11 @@ class Hike:
 
     .. data:: GROUND
 
-       Ground fields.
+       Ground tiles.
 
     .. data:: TREES
 
-       Tree fields.
+       Tree tiles.
     """
 
     RADIUS = 4
@@ -803,14 +803,14 @@ class Hike:
         for direction in directions:
             dx, dy = self._DISPLACEMENTS[direction]
             x, y = x + dx, y + dy
-            field = self.map[y][x]
-            move.append((direction, field))
+            tile = self.map[y][x]
+            move.append((direction, tile))
             self._revealed.add((x, y))
 
-            if field in self.TREES or field == '📍':
+            if tile in self.TREES or tile == '📍':
                 break
-            if field == self.resource:
-                self.gathered.append(field)
+            if tile == self.resource:
+                self.gathered.append(tile)
                 self.map[y][x] = '🟩'
         self.moves.append(move)
 
@@ -818,10 +818,10 @@ class Hike:
             await self.space.record_hike(self)
         return move
 
-    def find_path(self, field: str) -> list[str]:
-        """Find directions to *field*.
+    def find_path(self, tile: str) -> list[str]:
+        """Find directions to *tile*.
 
-        If *field* is not reachable, a :exc:`ValueError` is raised.
+        If *tile* is not reachable, a :exc:`ValueError` is raised.
         """
         queue = deque([[(self.RADIUS, self.RADIUS)]])
         while queue:
@@ -833,23 +833,23 @@ class Hike:
                 continue
             if path.count((x, y)) > 1:
                 continue
-            if self.map[y][x] == field:
+            if self.map[y][x] == tile:
                 return [self._DIRECTIONS[(b[0] - a[0], b[1] - a[1])]
                         for a, b in zip(path, path[1:])]
 
             for coords in self._get_adjacents(x, y):
                 queue.appendleft(path + [coords])
-        raise ValueError(f'Unreachable {field}')
+        raise ValueError(f'Unreachable tile {tile}')
 
     def text(self, *, revealed: bool = False) -> str:
         """Return a text representation of the map.
 
-        Fields not visited by the player so far are hidden, unless *revealed* is set.
+        Tiles not visited by the player so far are hidden, unless *revealed* is set.
         """
         return '\n'.join(
             ''.join(
-                field if field and ((x, y) in self._revealed or revealed) else '⬜'
-                for x, field in enumerate(row))
+                tile if tile and ((x, y) in self._revealed or revealed) else '⬜'
+                for x, tile in enumerate(row))
             for y, row in enumerate(self.map))
 
     def _get_adjacents(self, x: int, y: int) -> list[tuple[int, int]]:
@@ -863,8 +863,8 @@ class Hike:
         distances = self._generate_passable(round(area * 2 / 3))
         passable = list(distances.items())
         shuffle(passable)
-        def get_distance(field: tuple[tuple[int, int], int]) -> int:
-            return field[1]
+        def get_distance(tile: tuple[tuple[int, int], int]) -> int:
+            return tile[1]
         passable.sort(key=get_distance)
 
         # Place trees

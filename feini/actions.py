@@ -710,7 +710,7 @@ class HikeMode(Mode):
                 ).format(moves=moves))
         else:
             assert False
-        if any(field == self.hike.resource for _, field in move):
+        if any(tile == self.hike.resource for _, tile in move):
             parts.append(
                 random.choice([
                     f'{space.pet_name} found a {self.hike.resource}. 😊',
