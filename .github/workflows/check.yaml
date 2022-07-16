@@ -3,13 +3,13 @@ on:
     - push
     - pull_request
 jobs:
-    test:
-        runs-on: ubuntu-latest
+    check:
         strategy:
             matrix:
                 python:
-                    - '3.9'
-                    - '3.10'
+                    - "3.9"
+                    - "3.10"
+        runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v3
             - uses: actions/setup-python@v4
@@ -19,7 +19,6 @@ jobs:
             - run: make deps
             - run: make deps-dev
             - run: make type
-              continue-on-error: true # temporary until code base is completely typed
             - run: make test
-            - run: make lint
+            - run: echo "X${{github.event.head_commit.message}}X" # make lint
               continue-on-error: ${{ contains(github.event.head_commit.message, 'WIP') }}
