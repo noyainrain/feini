@@ -30,6 +30,7 @@ async def update_pet_fields() -> None:
     # if 'pet_name' in space
     # del 'pet_name' from space
     # add 'name" to pet
+    pass
 
 async def update_space_stories() -> None:
     updates = 0
