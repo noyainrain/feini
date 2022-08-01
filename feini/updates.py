@@ -24,6 +24,13 @@ from . import context
 from .space import Space
 from .util import randstr
 
+# TODO
+async def update_pet_fields() -> None:
+    # for each space
+    # if 'pet_name' in space
+    # del 'pet_name' from space
+    # add 'name" to pet
+
 async def update_space_stories() -> None:
     updates = 0
     bot = context.bot.get()

@@ -59,12 +59,14 @@ class IntroStory(Story):
             chapter = await pipe.hget(self.id, 'chapter')
             if not chapter:
                 raise ReferenceError(self.id)
-            values = await pipe.hmget(self.space_id, 'resources', 'tools', 'pet_is_egg',
-                                      'pet_nutrition')
+            values = await pipe.hmget(self.space_id, 'resources', 'tools', 'pet_id')
             items = (values[0] or '').split()
             tools = (values[1] or '').split()
-            hatched = not bool(values[2])
-            nutrition = int(values[3] or '')
+            pet_id = values[2]
+            assert pet_id
+            values = await pipe.hmget(pet_id, 'hatched', 'nutrition')
+            hatched = bool(values[0])
+            nutrition = int(values[1] or '')
 
             pipe.multi()
             if chapter == 'start':

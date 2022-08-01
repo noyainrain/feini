@@ -25,11 +25,12 @@ class SpaceTest(TestCase):
     async def test_tick(self) -> None:
         await self.space.tick(0)
         space = await self.space.get()
+        pet = await space.get_pet()
         self.assertEqual(space.time, 1)
         self.assertEqual(space.meadow_vegetable_growth, Space.MEADOW_VEGETABLE_GROWTH_MAX + 1)
         self.assertEqual(space.woods_growth, Space.WOODS_GROWTH_MAX + 1)
         self.assertEqual(space.trail_supply, Space.TRAIL_SUPPLY_MAX + 1)
-        self.assertEqual(space.pet_nutrition, (8 - 1) - 1)
+        self.assertEqual(pet.nutrition, (8 - 1) - 1)
 
     async def test_obtain(self) -> None:
         await self.space.obtain('🪵', '🧶', '🥕')
@@ -113,34 +114,35 @@ class PetTest(TestCase):
         await self.pet.tick()
         pet = await self.pet.get()
         space = await self.space.get()
-        self.assertEqual(space.pet_nutrition, (8 - 1) - 1)
+        self.assertEqual(pet.nutrition, (8 - 1) - 1)
         self.assertEqual(pet.dirt, Pet.DIRT_MAX - (8 - 1) + 1)
-        self.assertEqual(space.pet_fur, 1)
+        self.assertEqual(pet.fur, 1)
 
         for _ in range(self.TRIALS):
-            if space.pet_activity_id != '':
+            if pet.activity_id != '':
                 break
             await self.pet.tick()
-            space = await space.get()
+            pet = await self.pet.get()
         else:
             self.fail()
 
     async def test_touch(self) -> None:
         await self.pet.touch()
-        space = await self.space.get()
-        self.assertTrue(space.pet_hatched)
+        pet = await self.pet.get()
+        self.assertTrue(pet.hatched)
 
     async def test_feed(self) -> None:
         await self.space.obtain('🥕', '🥕')
         await self.pet.feed('🥕')
+        pet = await self.pet.get()
         space = await self.space.get()
+        self.assertEqual(pet.nutrition, Pet.NUTRITION_MAX)
         self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
-        self.assertEqual(space.pet_nutrition, Pet.NUTRITION_MAX)
 
     async def test_feed_full_pet(self) -> None:
         await self.space.obtain('🥕')
         await self.pet.feed('🥕')
-        with self.assertRaisesRegex(ValueError, 'pet_nutrition'):
+        with self.assertRaisesRegex(ValueError, 'nutrition'):
             await self.pet.feed('🥕')
 
     async def test_feed_no_vegetable(self) -> None:
@@ -179,10 +181,11 @@ class PetTest(TestCase):
         for tick in range(Pet.FUR_MAX):
             await self.space.tick(tick)
         wool = await self.pet.shear()
+        pet = await self.pet.get()
         space = await self.space.get()
         self.assertEqual(wool, ['🧶']) # type: ignore[misc]
+        self.assertEqual(pet.fur, 0)
         self.assertEqual(space.items, ['🥕', '🧶']) # type: ignore[misc]
-        self.assertEqual(space.pet_fur, 0)
 
     async def test_shear_immature_fur(self) -> None:
         await self.space.obtain('✂️')
@@ -191,8 +194,8 @@ class PetTest(TestCase):
 
     async def test_change_name(self) -> None:
         await self.pet.change_name('Frank  ')
-        space = await self.space.get()
-        self.assertEqual(space.pet_name, 'Frank')
+        pet = await self.pet.get()
+        self.assertEqual(pet.name, 'Frank')
 
 class CharacterTest(TestCase):
     async def test_talk(self) -> None:
