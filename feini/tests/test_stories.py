@@ -42,7 +42,7 @@ class IntroStoryTest(TestCase):
         story = await story.get()
         self.assertEqual(story.chapter, 'feed')
 
-        await pet.feed()
+        await pet.feed('🥕')
         await story.tell()
         story = await story.get()
         self.assertEqual(story.chapter, 'craft')

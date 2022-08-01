@@ -416,19 +416,29 @@ class MainMode(Mode):
         else:
             return await func(self, space, activity)
 
-    @item_action('🥕')
-    async def feed_pet(self, space: Space, *args: str) -> str:
+    async def _feed_pet(self, space: Space, *args: str) -> str:
+        food = normalize_emoji(args[0])
         pet = await space.get_pet()
+
         try:
-            await pet.feed()
+            await pet.feed(food)
         except ValueError as e:
             if 'pet_nutrition' in str(e):
-                return pet_message(pet, f'{space.pet_name} seems full and ignores the veggies 🥕.')
+                return pet_message(pet, f'{space.pet_name} seems full and ignores the {food} food.')
             raise
+
+        if food == '🍲':
+            return random.choice([
+                pet_message(pet, f'{space.pet_name} relishes the dish.', focus=food, mood='😍'),
+                pet_message(pet, f'{space.pet_name} digs in.', focus=food, mood='😍')
+            ])
         return random.choice([
-            pet_message(pet, f'{space.pet_name} enjoys its veggies.', focus='🥕', mood='😊'),
-            pet_message(pet, f'{space.pet_name} digs in.', focus='🥕', mood='😊')
+            pet_message(pet, f'{space.pet_name} enjoys its food.', focus=food, mood='😊'),
+            pet_message(pet, f'{space.pet_name} digs in.', focus=food, mood='😊')
         ])
+
+    feed_pet = item_action('🥕')(_feed_pet)
+    _feed_pet_stew = item_action('🍲')(_feed_pet)
 
     @item_action('🧽')
     async def wash_pet(self, space: Space, *args: str) -> str:

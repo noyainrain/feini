@@ -132,20 +132,20 @@ class PetTest(TestCase):
 
     async def test_feed(self) -> None:
         await self.space.obtain('🥕', '🥕')
-        await self.pet.feed()
+        await self.pet.feed('🥕')
         space = await self.space.get()
         self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
         self.assertEqual(space.pet_nutrition, Pet.NUTRITION_MAX)
 
     async def test_feed_full_pet(self) -> None:
         await self.space.obtain('🥕')
-        await self.pet.feed()
+        await self.pet.feed('🥕')
         with self.assertRaisesRegex(ValueError, 'pet_nutrition'):
-            await self.pet.feed()
+            await self.pet.feed('🥕')
 
     async def test_feed_no_vegetable(self) -> None:
         with self.assertRaisesRegex(ValueError, 'items'):
-            await self.pet.feed()
+            await self.pet.feed('🥕')
 
     async def test_wash(self) -> None:
         await self.pet.wash()

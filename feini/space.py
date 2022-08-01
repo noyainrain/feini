@@ -136,7 +136,8 @@ class Space(Entity):
     TRAIL_SUPPLY_MAX = 24 - 1
 
     ITEM_CATEGORIES = {
-        'resource': ['🥕', '🪨', '🪵', '🧶'],
+        'food': ['🥕', '🍲'],
+        'resource': ['🪨', '🪵', '🧶'],
         'clothing': ['🧢', '👒', '🎧', '👓', '🕶️', '🥽', '🧣', '🎀', '💍'],
         'tool': ['👋', '✏️', '🧺', '🪓', '✂️', '🔨', '🪡', '🍳', '🧽', '🚿', '🧭']
     }
@@ -530,8 +531,11 @@ class Pet(Entity):
         """
         await context.bot.get().redis.hset(self.space_id, 'pet_is_egg', '')
 
-    async def feed(self) -> None:
+    async def feed(self, food: str) -> None:
         """Feed a vegetable to the pet."""
+        if food not in Space.ITEM_CATEGORIES['food']:
+            raise ValueError(f'Unknown food {food}')
+
         async with context.bot.get().redis.pipeline() as pipe:
             await pipe.watch(self.space_id)
             values = await pipe.hmget(self.space_id, 'resources', 'pet_nutrition')
@@ -544,9 +548,9 @@ class Pet(Entity):
 
             pipe.multi()
             try:
-                items.remove('🥕')
+                items.remove(food)
             except ValueError:
-                raise ValueError('No space items item 🥕') from None
+                raise ValueError(f'No space items item {food}') from None
             pipe.hset(self.space_id,
                       mapping={'resources': ' '.join(items), 'pet_nutrition': self.NUTRITION_MAX})
             await pipe.execute()
@@ -765,8 +769,11 @@ class Hike:
     _DIRECTIONS = {displacement: direction for direction, displacement in _DISPLACEMENTS.items()}
 
     def __init__(self, space: Space, *, resource: str | None = None) -> None:
-        if not (resource is None or resource in Space.ITEM_CATEGORIES['resource']):
-            raise ValueError('Bad resource')
+        if (
+            not (resource is None or resource in Space.ITEM_CATEGORIES['resource'] or
+                 resource == '🥕')
+        ):
+            raise ValueError(f'Bad resource {resource}')
 
         self.space = space
         size = self.RADIUS * 2 + 1
