@@ -24,13 +24,40 @@ from . import context
 from .space import Space
 from .util import randstr
 
-# TODO
-async def update_pet_fields() -> None:
-    # for each space
-    # if 'pet_name' in space
-    # del 'pet_name' from space
-    # add 'name" to pet
-    pass
+async def update_pet_name() -> None:
+    updates = 0
+    redis = context.bot.get().redis
+    for space_id in await redis.hvals('spaces_by_chat'):
+        if await redis.hexists(space_id, 'pet_name'):
+            values = await redis.hmget(space_id, 'pet_id', 'pet_name', 'pet_is_egg',
+                                       'pet_nutrition', 'pet_fur', 'pet_activity_id')
+
+            pet_id = values[0]
+            name = values[1]
+            hatched = not bool(values[2])
+            nutrition = values[3]
+            fur = values[4]
+            activity_id = values[5]
+            assert pet_id
+            assert name
+            assert nutrition
+            assert fur
+            assert activity_id
+
+            async with redis.pipeline() as pipe:
+                await pipe.hset(pet_id, mapping={
+                    'name': name,
+                    'hatched': 'true' if hatched else '',
+                    'nutrition': nutrition,
+                    'fur': fur,
+                    'activity_id': activity_id
+                })
+                # TODO type
+                await pipe.hdel(space_id, 'pet_name', 'pet_is_egg', 'pet_nutrition', 'pet_fur',
+                                'pet_activity_id')
+            updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Pet.name (%d)', updates)
 
 async def update_space_stories() -> None:
     updates = 0
