@@ -78,26 +78,6 @@ class Space(Entity):
 
        ID of the residing :class:`Pet`.
 
-    .. attribute:: pet_name
-
-       Name of the pet.
-
-    .. attribute:: pet_hatched
-
-       Indicates if the pet has hatched or is still an egg.
-
-    .. attribute:: pet_nutrition
-
-       Current nutrition level of the pet.
-
-    .. attribute:: pet_fur
-
-       Current fur growth level of the pet.
-
-    .. attribute:: pet_activity_id
-
-       Current pet activity emoji or ID of the furniture item the pet is engaged with.
-
     .. attribute:: MEADOW_VEGETABLE_GROWTH_MAX
 
        Level at which a vegetable is fully grown.
@@ -190,22 +170,10 @@ class Space(Entity):
         self.woods_growth = int(data['woods_growth'])
         self.trail_supply = int(data['trail_supply'])
         self.pet_id = data['pet_id']
-        self.pet_name = data['pet_name']
-        self.pet_hatched = not bool(data['pet_is_egg'])
-        self.pet_nutrition = int(data['pet_nutrition'])
-        self.pet_fur = int(data['pet_fur'])
-        self.pet_activity_id = data['pet_activity_id']
 
     async def get_pet(self) -> Pet:
         """Get the residing pet."""
         return await context.bot.get().get_pet(self.pet_id)
-
-    async def get_pet_activity(self) -> Furniture | str:
-        """Get the current pet activity emoji or furniture item the pet is engaged with."""
-        try:
-            return await context.bot.get().get_furniture_item(self.pet_activity_id)
-        except ValueError:
-            return self.pet_activity_id
 
     async def get_blueprints(self) -> list[str]:
         """Get known blueprints."""
@@ -407,6 +375,27 @@ class Space(Entity):
             await pipe.execute()
         return pattern
 
+    async def cook(self) -> str:
+        """Prepare a dish from a vegetable."""
+        async with context.bot.get().redis.pipeline() as pipe:
+            await pipe.watch(self.id)
+            value = await pipe.hget(self.id, 'resources')
+            if value is None:
+                raise ReferenceError(self.id)
+            items = value.split()
+
+            pipe.multi()
+            try:
+                items.remove('🥕')
+            except ValueError:
+                raise ValueError('No items item 🥕') from None
+            dish = '🍲'
+            items.append(dish)
+            items.sort(key=self.ITEM_WEIGHTS.__getitem__)
+            pipe.hset(self.id, 'resources', ' '.join(items))
+            await pipe.execute()
+            return dish
+
     async def hike(self) -> Hike:
         """Start a hike.
 
@@ -455,13 +444,33 @@ class Pet(Entity):
 
        ID of the :class:`Space` the pet inhabits.
 
+    .. attribute:: name
+
+       Name of the pet.
+
+    .. attribute:: hatched
+
+       Indicates if the pet has hatched or is still an egg.
+
+    .. attribute:: nutrition
+
+       Current nutrition level.
+
     .. attribute:: dirt
 
        Current dirtiness level.
 
+    .. attribute:: fur
+
+       Current fur growth level.
+
     .. attribute:: clothing
 
        Clothing the pet is wearing.
+
+    .. attribute:: activity_id
+
+       Current activity emoji or ID of the furniture item the pet is engaged with.
 
     .. attribute:: NUTRITION_MAX
 
@@ -483,34 +492,45 @@ class Pet(Entity):
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
         self.space_id = data['space_id']
+        self.name = data['name']
+        self.hatched = bool(data['hatched'])
+        self.nutrition = int(data['nutrition'])
         self.dirt = int(data['dirt'])
+        self.fur = int(data['fur'])
         self.clothing = data['clothing'] or None
+        self.activity_id = data['activity_id']
 
     async def get_space(self) -> Space:
         """Get the space the pet inhabits."""
         return await context.bot.get().get_space(self.space_id)
+
+    async def get_activity(self) -> Furniture | str:
+        """Get the current activity emoji or furniture item the pet is engaged with."""
+        try:
+            return await context.bot.get().get_furniture_item(self.activity_id)
+        except ValueError:
+            return self.activity_id
 
     async def tick(self) -> None:
         """Simulate the pet for one tick."""
         bot = context.bot.get()
         async with bot.redis.pipeline() as pipe:
             furniture_key = f'{self.space_id}.items'
-            await pipe.watch(self.id, self.space_id, furniture_key)
-            try:
-                nutrition = int(await pipe.hget(self.space_id, 'pet_nutrition') or '')
-            except ValueError:
-                raise ReferenceError(self.id) from None
-            dirt = int(await pipe.hget(self.id, 'dirt') or '')
+            await pipe.watch(self.id, furniture_key)
+            values = await pipe.hmget(self.id, 'nutrition', 'dirt')
+            if not values:
+                raise ReferenceError(self.id)
+            nutrition = int(values[0] or '')
+            dirt = int(values[1] or '')
             furniture_ids = await pipe.lrange(furniture_key, 0, -1)
 
             pipe.multi()
             nutrition -= 1
             dirt += 1
             activity_id = random.choice(['', '💤', '🍃', *furniture_ids])
-            pipe.hset(self.space_id,
-                      mapping={'pet_nutrition': nutrition, 'pet_activity_id': activity_id})
-            pipe.hset(self.id, 'dirt', dirt)
-            pipe.hincrby(self.space_id, 'pet_fur', 1)
+            pipe.hset(self.id,
+                      mapping={'nutrition': nutrition, 'dirt': dirt, 'activity_id': activity_id})
+            pipe.hincrby(self.id, 'fur', 1)
             if nutrition == 0:
                 pipe.rpush('events', f'pet-hungry {self.space_id}')
             if dirt == self.DIRT_MAX:
@@ -529,30 +549,30 @@ class Pet(Entity):
 
         If the pet is still an egg, it hatches.
         """
-        await context.bot.get().redis.hset(self.space_id, 'pet_is_egg', '')
+        await context.bot.get().redis.hset(self.id, 'hatched', 'true')
 
     async def feed(self, food: str) -> None:
-        """Feed a vegetable to the pet."""
+        """Feed the pet with *food*."""
         if food not in Space.ITEM_CATEGORIES['food']:
             raise ValueError(f'Unknown food {food}')
 
         async with context.bot.get().redis.pipeline() as pipe:
-            await pipe.watch(self.space_id)
-            values = await pipe.hmget(self.space_id, 'resources', 'pet_nutrition')
-            if not values:
-                raise ReferenceError(self.id)
-            items = (values[0] or '').split()
-            nutrition = int(values[1] or '')
+            await pipe.watch(self.id, self.space_id)
+            try:
+                nutrition = int(await pipe.hget(self.id, 'nutrition') or '')
+            except ValueError:
+                raise ReferenceError(self.id) from None
+            items = (await pipe.hget(self.space_id, 'resources') or '').split()
             if nutrition >= self.NUTRITION_MAX:
-                raise ValueError('Maximal space pet_nutrition')
+                raise ValueError('Maximal nutrition')
 
             pipe.multi()
             try:
                 items.remove(food)
             except ValueError:
                 raise ValueError(f'No space items item {food}') from None
-            pipe.hset(self.space_id,
-                      mapping={'resources': ' '.join(items), 'pet_nutrition': self.NUTRITION_MAX})
+            pipe.hset(self.id, 'nutrition', self.NUTRITION_MAX)
+            pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
 
     async def wash(self) -> None:
@@ -598,13 +618,14 @@ class Pet(Entity):
     async def shear(self) -> list[str]:
         """Shear available wool from the pet and return a receipt."""
         async with context.bot.get().redis.pipeline() as pipe:
-            await pipe.watch(self.space_id)
-            values = await pipe.hmget(self.space_id, 'resources', 'tools', 'pet_fur')
-            if not values:
-                raise ReferenceError(self.id)
+            await pipe.watch(self.id, self.space_id)
+            try:
+                fur = int(await pipe.hget(self.id, 'fur') or '')
+            except ValueError:
+                raise ReferenceError(self.id) from None
+            values = await pipe.hmget(self.space_id, 'resources', 'tools')
             items = (values[0] or '').split()
             tools = (values[1] or '').split()
-            fur = int(values[2] or '')
             if '✂️' not in tools:
                 raise ValueError('No space tools item ✂️')
 
@@ -613,7 +634,8 @@ class Pet(Entity):
             if fur >= self.FUR_MAX:
                 wool = ['🧶']
                 items = sorted(items + wool, key=Space.ITEM_WEIGHTS.__getitem__)
-                pipe.hset(self.space_id, mapping={'resources': ' '.join(items), 'pet_fur': 0})
+                pipe.hset(self.id, 'fur', 0)
+                pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
             return wool
 
@@ -622,7 +644,7 @@ class Pet(Entity):
         name = name.strip()
         if not name:
             raise ValueError(f'Blank name {name}')
-        await context.bot.get().redis.hset(self.space_id, 'pet_name', name)
+        await context.bot.get().redis.hset(self.id, 'name', name)
 
     def __str__(self) -> str:
         return f"🐕{self.clothing or ''}"

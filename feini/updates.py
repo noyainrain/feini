@@ -24,6 +24,38 @@ from . import context
 from .space import Space
 from .util import randstr
 
+async def update_pet_name() -> None:
+    updates = 0
+    redis = context.bot.get().redis
+    for space_id in await redis.hvals('spaces_by_chat'):
+        if await redis.hexists(space_id, 'pet_name'):
+            attrs = ('pet_name', 'pet_is_egg', 'pet_nutrition', 'pet_fur', 'pet_activity_id')
+            values = await redis.hmget(space_id, 'tools', 'pet_id', *attrs)
+            tools = (values[0] or '').split()
+            pet_id = values[1]
+            assert pet_id
+            name, is_egg, nutrition, fur, activity_id = values[2:]
+            assert name and is_egg is not None and nutrition and fur and activity_id is not None
+
+            async with redis.pipeline() as pipe:
+                pipe.multi()
+                pipe.hset(pet_id, mapping={
+                    'name': name,
+                    'hatched': 'true' if not bool(is_egg) else '',
+                    'nutrition': nutrition,
+                    'fur': fur,
+                    'activity_id': activity_id
+                })
+                pipe.hdel(space_id, *attrs)
+                if '🍳' in tools:
+                    pipe.rpush('events', f'space-update-pan {space_id}')
+                if '🚿' in tools:
+                    pipe.rpush('events', f'space-update-shower {space_id}')
+                await pipe.execute()
+                updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Pet.name (%d)', updates)
+
 async def update_space_stories() -> None:
     updates = 0
     bot = context.bot.get()

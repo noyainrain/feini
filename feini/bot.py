@@ -157,14 +157,16 @@ class Bot:
             space = await self.get_space_by_chat(chat)
         except KeyError:
             space = await self.create_space(chat)
+            pet = await space.get_pet()
             self._story_tasks.add(create_task(space.tell_stories()))
-            logger.info('Created space for %s (%s)', chat, space.pet_name)
+            logger.info('Created space for %s (%s)', chat, pet.name)
             return '🥚 You found an egg. 😮'
 
+        pet = await space.get_pet()
         args = self._parse_action(action)
         reply = await self.get_mode(chat).perform(space, *args)
         self._story_tasks.add(create_task(space.tell_stories()))
-        logger.info('%s (%s): %s', chat, space.pet_name, ' '.join(args))
+        logger.info('%s (%s): %s', chat, pet.name, ' '.join(args))
         return reply
 
     def get_mode(self, chat: str) -> Mode:
@@ -237,12 +239,7 @@ class Bot:
                 'meadow_vegetable_growth': str(Space.MEADOW_VEGETABLE_GROWTH_MAX),
                 'woods_growth': str(Space.WOODS_GROWTH_MAX),
                 'trail_supply': str(Space.TRAIL_SUPPLY_MAX),
-                'pet_id': pet_id,
-                'pet_name': 'Feini',
-                'pet_is_egg': 'true',
-                'pet_nutrition': str(8 - 1),
-                'pet_fur': '0',
-                'pet_activity_id': ''
+                'pet_id': pet_id
             }
             pipe.hset(space_id, mapping=space)
             pipe.hset('spaces_by_chat', chat, space_id)
@@ -250,8 +247,13 @@ class Bot:
             pet = {
                 'id': pet_id,
                 'space_id': space_id,
+                'name': 'Feini',
+                'hatched': '',
+                'nutrition': str(8 - 1),
                 'dirt': str(Pet.DIRT_MAX - (8 - 1)),
-                'clothing': ''
+                'fur': '0',
+                'clothing': '',
+                'activity_id': ''
             }
             pipe.hset(pet_id, mapping=pet)
 
@@ -295,9 +297,10 @@ class Bot:
                 event_type, space_id = event.split()
                 with recovery():
                     space = await shield(self.get_space(space_id))
+                    pet = await shield(space.get_pet())
                     reply = await shield(event_messages[event_type](space))
                     self._send(Message(space.chat, reply))
-                    logger.info('%s (%s): %s', space.chat, space.pet_name, event_type)
+                    logger.info('%s (%s): %s', space.chat, pet.name, event_type)
         except CancelledError:
             logger.info('Stopped event queue')
             raise

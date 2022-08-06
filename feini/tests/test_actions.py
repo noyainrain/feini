@@ -40,15 +40,24 @@ class Test(TestCase):
         reply = await self.bot.perform('local', '🪡🎀')
         self.assertEqual(reply[0], '🪡')
 
+        await self.bot.perform('local', 'obtain 🍳')
+        reply = await self.bot.perform('local', '🍳')
+        self.assertRegex(reply, '^🍳')
+
         # Play with pet
         reply = await self.bot.perform('local', '👋')
         self.assertEqual(reply[0], '🥚')
 
+        await self.bot.perform('local', 'obtain 🥕')
         reply = await self.bot.perform('local', '🥕')
         self.assertEqual(reply[:2], '🥕🐕')
 
         reply = await self.bot.perform('local', '🧽')
-        self.assertEqual(reply[:2], '🧽🐕')
+        self.assertRegex(reply, '^🧽🐕')
+
+        await self.bot.perform('local', 'obtain 🚿')
+        reply = await self.bot.perform('local', '🚿')
+        self.assertRegex(reply, '^🐕')
 
         reply = await self.bot.perform('local', '🎀')
         self.assertEqual(reply[:2], '🐕🎀')
