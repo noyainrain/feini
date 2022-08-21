@@ -483,11 +483,16 @@ class Pet(Entity):
     .. attribute:: FUR_MAX
 
        Level at which the fur is fully grown.
+
+    .. attribute:: ACTIVITIES
+
+       Available stand-alone activities.
     """
 
     NUTRITION_MAX = 24 + 1
     DIRT_MAX = 48 + 1
     FUR_MAX = 8 - 1
+    ACTIVITIES = {'💤', '🍃'}
 
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
@@ -515,21 +520,17 @@ class Pet(Entity):
         """Simulate the pet for one tick."""
         bot = context.bot.get()
         async with bot.redis.pipeline() as pipe:
-            furniture_key = f'{self.space_id}.items'
-            await pipe.watch(self.id, furniture_key)
+            await pipe.watch(self.id)
             values = await pipe.hmget(self.id, 'nutrition', 'dirt')
             if not values:
                 raise ReferenceError(self.id)
             nutrition = int(values[0] or '')
             dirt = int(values[1] or '')
-            furniture_ids = await pipe.lrange(furniture_key, 0, -1)
 
             pipe.multi()
             nutrition -= 1
             dirt += 1
-            activity_id = random.choice(['', '💤', '🍃', *furniture_ids])
-            pipe.hset(self.id,
-                      mapping={'nutrition': nutrition, 'dirt': dirt, 'activity_id': activity_id})
+            pipe.hset(self.id, mapping={'nutrition': nutrition, 'dirt': dirt})
             pipe.hincrby(self.id, 'fur', 1)
             if nutrition == 0:
                 pipe.rpush('events', f'pet-hungry {self.space_id}')
@@ -537,12 +538,10 @@ class Pet(Entity):
                 pipe.rpush('events', f'pet-dirty {self.space_id}')
             await pipe.execute()
 
-        try:
-            item = await bot.get_furniture_item(activity_id)
-        except ValueError:
-            pass
-        else:
-            await item.use()
+        space = await self.get_space()
+        furniture = await space.get_furniture()
+        activities: list[Furniture | str] = ['', *self.ACTIVITIES, *furniture]
+        await self.engage(random.choice(activities))
 
     async def touch(self) -> None:
         """Touch the pet.
@@ -645,6 +644,25 @@ class Pet(Entity):
         if not name:
             raise ValueError(f'Blank name {name}')
         await context.bot.get().redis.hset(self.id, 'name', name)
+
+    async def engage(self, activity: Furniture | str) -> None:
+        """Engage the pet in the given *activity*."""
+        async with context.bot.get().redis.pipeline() as pipe:
+            if isinstance(activity, Furniture):
+                await pipe.watch(activity.id)
+                if not await pipe.exists(activity.id):
+                    raise ReferenceError(activity.id)
+                activity_id = activity.id
+            else:
+                if not (activity in self.ACTIVITIES or not activity):
+                    raise ValueError(f'Unknown activity {activity}')
+                activity_id = activity
+            pipe.multi()
+            pipe.hset(self.id, 'activity_id', activity_id)
+            await pipe.execute()
+
+        if isinstance(activity, Furniture):
+            await activity.use()
 
     def __str__(self) -> str:
         return f"🐕{self.clothing or ''}"

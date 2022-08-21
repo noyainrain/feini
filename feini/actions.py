@@ -526,28 +526,59 @@ class MainMode(Mode):
         ])
 
     @furniture_action('🪃')
-    async def view_boomerang(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice(['🪃 Good quality!', '🪃 Beautiful!'])
+    async def engange_pet_boomerang(self, space: Space, piece: Furniture, *args: str) -> str:
+        pet = await space.get_pet()
+        await pet.engage(piece)
+        return random.choice([
+            pet_message(pet, f'{pet.name} starts after the boomerang. {speak()}', focus=str(piece),
+                        mood='😊'),
+            pet_message(pet, f'{pet.name} snatches the boomerong as it returns.', focus=str(piece),
+                        mood='😊')
+        ])
 
     @furniture_action('⚾')
-    async def view_ball(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice(['⚾ Good quality!', '⚾ Beautiful!'])
+    async def engage_pet_ball(self, space: Space, piece: Furniture, *args: str) -> str:
+        pet = await space.get_pet()
+        await pet.engage(piece)
+        return random.choice([
+            pet_message(pet, f'You throw the ball for {pet.name}. {speak()}', focus=str(piece),
+                        mood='😊'),
+            pet_message(pet, f'{pet.name} goes to fetch the ball.', focus=str(piece), mood='😊')
+        ])
 
     @furniture_action('🧸')
-    async def view_teddy(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice(['🧸 Good quality!', '🧸 Beautiful!'])
+    async def engage_pet_teddy(self, space: Space, piece: Furniture, *args: str) -> str:
+        pet = await space.get_pet()
+        await pet.engage(piece)
+        return random.choice([
+            pet_message(pet, f'{pet.name} guards its teddy.', focus=str(piece)),
+            pet_message(pet, 'Grrr!', focus=str(piece))
+        ])
 
     @furniture_action('🛋️')
-    async def view_couch(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice(['🛋️ Good quality!', '🛋️ Beautiful!'])
+    async def engage_pet_couch(self, space: Space, piece: Furniture, *args: str) -> str:
+        pet = await space.get_pet()
+        await pet.engage(piece)
+        return random.choice([
+            pet_message(pet, f'{pet.name} comes over as you pat the couch.', focus=str(piece),
+                        mood='😊'),
+            pet_message(pet, f'{pet.name} jumps on the couch.', focus=str(piece), mood='😊')
+        ])
 
     @furniture_action('🪴')
     async def view_houseplant(self, space: Space, piece: Furniture, *args: str) -> str:
         return random.choice([f'{piece} Good quality!', f'{piece} Beautiful!'])
 
     @furniture_action('⛲')
-    async def view_fountain(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice(['⛲ Good quality!', '⛲ Beautiful!'])
+    async def engage_pet_fountain(self, space: Space, piece: Furniture, *args: str) -> str:
+        pet = await space.get_pet()
+        await pet.engage(piece)
+        return random.choice([
+            pet_message(pet, f'You splash some water on {pet.name}. {speak()}', focus=str(piece),
+                        mood='😊'),
+            pet_message(pet, f'{pet.name} dodges as you splash water around.', focus=str(piece),
+                        mood='😊')
+        ])
 
     @furniture_action('📺')
     async def view_television(self, space: Space, piece: Furniture, *args: str) -> str:
@@ -603,9 +634,8 @@ class MainMode(Mode):
     async def _boomerang_message(self, space: Space, activity: Furniture | str) -> str:
         pet = await space.get_pet()
         return random.choice([
-            pet_message(pet, f'{pet.name} is fetching the boomerang. {speak()}',
-                        focus=str(activity)),
-            pet_message(pet, f'{pet.name} is carrying the boomerang around.', focus=str(activity))
+            pet_message(pet, f'{pet.name} is carrying the boomerang around.', focus=str(activity)),
+            pet_message(pet, f'{pet.name} is gnawing on the boomerang.', focus=str(activity))
         ])
 
     async def _ball_message(self, space: Space, activity: Furniture | str) -> str:
@@ -620,7 +650,7 @@ class MainMode(Mode):
         pet = await space.get_pet()
         return random.choice([
             pet_message(pet, f'{pet.name} is cuddling with its teddy.', focus=str(activity)),
-            pet_message(pet, f'{pet.name} is guarding its teddy.', focus=str(activity))
+            pet_message(pet, f'{pet.name} looks very fond of its teddy.', focus=str(activity))
         ])
 
     async def _couch_message(self, space: Space, activity: Furniture | str) -> str:
@@ -644,7 +674,7 @@ class MainMode(Mode):
         return random.choice([
             pet_message(pet, f'{pet.name} is splashing around in the fountain. {speak()}',
                         focus=str(activity)),
-            pet_message(pet, f'{pet.name} is dipping its toes in the water.', focus=str(activity))
+            pet_message(pet, f'{pet.name} is dipping its paws in the water.', focus=str(activity))
         ])
 
     async def _television_message(self, space: Space, activity: Furniture | str) -> str:

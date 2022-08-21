@@ -207,6 +207,20 @@ class PetTest(TestCase):
         pet = await self.pet.get()
         self.assertEqual(pet.name, 'Frank')
 
+    async def test_engage(self) -> None:
+        await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
+        plant = await self.space.craft('🪴')
+        await self.pet.engage(plant)
+        pet = await self.pet.get()
+        activity = await pet.get_activity()
+        self.assertEqual(activity, plant)
+
+    async def test_engage_standalone_activity(self) -> None:
+        await self.pet.engage('🍃')
+        pet = await self.pet.get()
+        activity = await pet.get_activity()
+        self.assertEqual(activity, '🍃')
+
 class CharacterTest(TestCase):
     async def test_talk(self) -> None:
         story = next(story for story in await self.space.get_stories()
