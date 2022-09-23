@@ -19,5 +19,6 @@ jobs:
             - run: make deps deps-dev
             - run: make type
             - run: make test
+            - run: make test-ext
             - run: make lint
               continue-on-error: ${{ contains(github.event.head_commit.message, 'WIP') }}

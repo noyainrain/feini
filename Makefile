@@ -7,6 +7,10 @@ PIPFLAGS=$$([ -z "$$VIRTUAL_ENV" ] && echo --user) --upgrade
 test:
 	$(PYTHON) -m unittest
 
+.PHONY: test-ext
+test-ext:
+	$(PYTHON) -m unittest discover --pattern="ext_test*.py"
+
 .PHONY: type
 type:
 	mypy feini scripts
@@ -16,7 +20,7 @@ lint:
 	pylint feini scripts
 
 .PHONY: check
-check: type test lint
+check: type test test-ext lint
 
 .PHONY: deps
 deps:

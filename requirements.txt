@@ -1,2 +1,3 @@
 aiohttp ~= 3.8
 aioredis ~= 2.0
+feedparser ~= 6.0

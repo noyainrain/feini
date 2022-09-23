@@ -46,8 +46,9 @@ async def main() -> None:
         print('Configuration error: Bad [feini] debug type', file=sys.stderr)
         return
     telegram_key = config.get('telegram', 'key') or None
+    tmdb_key = config.get('tmdb', 'key') or None
     try:
-        bot = Bot(redis_url=redis_url, telegram_key=telegram_key, debug=debug)
+        bot = Bot(redis_url=redis_url, telegram_key=telegram_key, tmdb_key=tmdb_key, debug=debug)
     except ValueError:
         print(f'Configuration error: Bad [feini] redis_url {redis_url}', file=sys.stderr)
         return

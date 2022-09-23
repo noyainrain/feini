@@ -680,14 +680,15 @@ class MainMode(Mode):
     async def _television_message(self, space: Space, activity: Furniture | str) -> str:
         assert isinstance(activity, Television)
         pet = await space.get_pet()
-        return pet_message(pet, f'{pet.name} is hooked by {activity.show}.', focus=str(activity))
+        return pet_message(pet, f'{pet.name} is hooked by {activity.show.title}.',
+                           focus=str(activity))
 
     async def _newspaper_message(self, space: Space, activity: Furniture | str) -> str:
         assert isinstance(activity, Newspaper)
         pet = await space.get_pet()
-        period = '' if unicodedata.category(activity.article[-1]).startswith('P') else '.'
+        period = '' if unicodedata.category(activity.article.title[-1]).startswith('P') else '.'
         return pet_message(
-            pet, f'{pet.name} is reading an article. {activity.article}{period}',
+            pet, f'{pet.name} is reading an article. {activity.article.title}{period}',
             focus=str(activity))
 
     async def _palette_message(self, space: Space, activity: Furniture | str) -> str:

@@ -38,30 +38,18 @@ class TelevisionTest(TestCase):
         await self.space.obtain(*FURNITURE_MATERIAL['📺'])
         tv = await self.space.craft('📺')
         assert isinstance(tv, Television)
-        show = tv.show
-
-        for _ in range(TRIALS):
-            await tv.use()
-            tv = await tv.get()
-            if tv.show != show:
-                break
-        else:
-            self.fail()
+        await tv.use()
+        tv = await tv.get()
+        self.assertEqual(tv.show, self.bot.tmdb.shows[0])
 
 class NewspaperTest(TestCase):
     async def test_use(self) -> None:
         await self.space.obtain(*FURNITURE_MATERIAL['🗞️'])
         newspaper = await self.space.craft('🗞️')
         assert isinstance(newspaper, Newspaper)
-        article = newspaper.article
-
-        for _ in range(TRIALS):
-            await newspaper.use()
-            newspaper = await newspaper.get()
-            if newspaper.article != article:
-                break
-        else:
-            self.fail()
+        await newspaper.use()
+        newspaper = await newspaper.get()
+        self.assertEqual(newspaper.article, self.bot.dw.articles[0])
 
 class PaletteTest(TestCase):
     async def test_tick(self) -> None:

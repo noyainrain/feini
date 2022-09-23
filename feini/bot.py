@@ -36,7 +36,7 @@ import aioredis.client
 
 from . import actions, context, updates
 from .actions import EventMessageFunc, MainMode, Mode
-from .furniture import Furniture, FURNITURE_TYPES
+from .furniture import DW, Furniture, TMDB, FURNITURE_TYPES
 from .space import Pet, Space
 from .util import JSONObject, Redis, cancel, raise_for_status, randstr, recovery
 
@@ -59,6 +59,14 @@ class Bot:
 
        Telegram messenger client, if configured.
 
+    .. attribute:: tmdb
+
+       The Movie Database source.
+
+    .. attribute:: dw
+
+       Deutsche Welle source.
+
     .. attribute:: debug
 
        Indicates if debug mode is enabled.
@@ -71,7 +79,7 @@ class Bot:
     TICK = 60 * 60
 
     def __init__(self, *, redis_url: str = 'redis:', telegram_key: str | None = None,
-                 debug: bool = False) -> None:
+                 tmdb_key: str | None = None, debug: bool = False) -> None:
         self.time = 0
         try:
             self.redis = cast(Redis,
@@ -80,6 +88,8 @@ class Bot:
             raise ValueError(f'Bad redis_url {redis_url}') from e
         self.http = ClientSession(timeout=ClientTimeout(total=20))
         self.telegram = Telegram(telegram_key) if telegram_key else None
+        self.tmdb = TMDB(key=tmdb_key)
+        self.dw = DW()
         self.debug = debug
 
         self._chat_modes: dict[str, Mode] = {}
@@ -145,6 +155,8 @@ class Bot:
         except CancelledError:
             pass
         await self.http.close()
+        await self.tmdb.close()
+        await self.dw.close()
 
     async def perform(self, chat: str, action: str) -> str:
         """Perform an action for the given *chat*.

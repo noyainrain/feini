@@ -25,10 +25,26 @@
 
 from __future__ import annotations
 
+import asyncio
+from asyncio import Task, create_task
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
+from dataclasses import dataclass
+from logging import getLogger
+from functools import partial
+import json
+from json import JSONDecodeError
 import random
+from typing import cast
+from xml.sax import SAXParseException
+
+from aiohttp import ClientError
+import feedparser
+from feedparser import ThingsNobodyCaresAboutButMe
 
 from . import context
 from .core import Entity
+from .util import JSONObject, cancel, raise_for_status
 
 FURNITURE_MATERIAL = {
     # Toys
@@ -104,72 +120,46 @@ class Television(Furniture):
 
     .. attribute:: show
 
-       Current show.
+       Current TV show.
     """
-
-    # Retrieved from https://www.rottentomatoes.com/browse/tv-list-2 on Feb 14 2022
-    _SHOWS = [
-        'The Book of Boba Fett',
-        'Reacher',
-        'Euphoria',
-        'The Woman In The House Across The Street From The Girl In The Window',
-        'All of Us Are Dead',
-        'Raised by Wolves',
-        'Peacemaker',
-        'Pam & Tommy',
-        'Inventing Anna',
-        'The Sinner'
-    ]
 
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
-        self.show = data['show']
+        self.show = Content.parse(data['show'])
 
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Television:
-        data = {'id': furniture_id, 'type': '📺', 'show': random.choice(Television._SHOWS)}
-        await context.bot.get().redis.hset(furniture_id, mapping=data)
+        bot = context.bot.get()
+        data = {'id': furniture_id, 'type': '📺', 'show': str(random.choice(bot.tmdb.shows))}
+        await bot.redis.hset(furniture_id, mapping=data)
         return Television(data)
 
     async def use(self) -> None:
-        await context.bot.get().redis.hset(self.id, 'show', random.choice(self._SHOWS))
+        bot = context.bot.get()
+        await bot.redis.hset(self.id, 'show', str(random.choice(bot.tmdb.shows)))
 
 class Newspaper(Furniture):
     """Newspaper.
 
     .. attribute:: article
 
-       Opened article.
+       Opened news article.
     """
-
-    # Retrieved from https://rss.nytimes.com/services/xml/rss/nyt/world.xml on Feb 14 2022
-    _ARTICLES = [
-        ('Canada Live Updates: Crossings at Blockaded Canadian Bridge May Resume Soon as Police '
-         'Move In'),
-        'The Quiet Flight of Muslims From France',
-        'Swiss Approve Ban on Tobacco Ads',
-        'In Hawaii, Blinken Aims for a United Front With Allies on North Korea',
-        ('Ukraine Live Updates: Airlines Suspend Flights as German Leader Warns of ‘Serious Threat '
-         'to Peace’'),
-        'Finland’s President Knows Putin Well. And He Fears for Ukraine.',
-        'Biden’s Decision on Frozen Funds Stokes Anger Among Afghans',
-        'Black Authors Shake Up Brazil’s Literary Scene',
-        'In Ottawa Trucker Protests, a Pressing Question: Where Were the Police?',
-        'Emmanuel Macron Recounts Face-Off With Vladimir Putin'
-    ]
 
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
-        self.article = data['article']
+        self.article = Content.parse(data['article'])
 
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Newspaper:
-        data = {'id': furniture_id, 'type': '🗞️', 'article': random.choice(Newspaper._ARTICLES)}
-        await context.bot.get().redis.hset(furniture_id, mapping=data)
+        bot = context.bot.get()
+        data = {'id': furniture_id, 'type': '🗞️', 'article': str(random.choice(bot.dw.articles))}
+        await bot.redis.hset(furniture_id, mapping=data)
         return Newspaper(data)
 
     async def use(self) -> None:
-        await context.bot.get().redis.hset(self.id, 'article', random.choice(self._ARTICLES))
+        bot = context.bot.get()
+        await bot.redis.hset(self.id, 'article', str(random.choice(bot.dw.articles)))
 
 class Palette(Furniture):
     """Canvas and palette.
@@ -195,6 +185,152 @@ class Palette(Furniture):
 
     def __str__(self) -> str:
         return self.state
+
+@dataclass
+class Content:
+    """Media content.
+
+    .. attribute:: title
+
+       Title of the content.
+    """
+
+    title: str
+
+    def __post_init__(self) -> None:
+        self.title = self.title.strip()
+        if not self.title:
+            raise ValueError('Blank title')
+
+    @staticmethod
+    def parse(data: str) -> Content:
+        """Parse the string representation *data* into media content."""
+        return Content(data)
+
+    def __str__(self) -> str:
+        return self.title
+
+class TMDB:
+    """The Movie Database source.
+
+    .. attribute:: CACHE_TTL
+
+       Time to live for cached content.
+
+    .. attribute:: key
+
+       TMDB API v4 key to fetch the current popular TV shows.
+    """
+
+    CACHE_TTL = timedelta(days=1)
+
+    def __init__(self, *, key: str | None = None) -> None:
+        self.key = key
+        self._shows = [Content('Buffy the Vampire Slayer')]
+        self._cache_expires = datetime.now()
+        self._fetch_task: Task[None] | None = None
+
+    @property
+    def shows(self) -> list[Content]:
+        """Current TV shows, ordered by popularity, highest first."""
+        if (
+            datetime.now() >= self._cache_expires and
+            (not self._fetch_task or self._fetch_task.done())
+        ):
+            self._fetch_task = create_task(self._fetch())
+        return self._shows
+
+    async def _fetch(self) -> None:
+        if not self.key:
+            return
+
+        logger = getLogger(__name__)
+        try:
+            headers = {'Authorization': f'Bearer {self.key}'}
+            response = await context.bot.get().http.get('https://api.themoviedb.org/3/tv/popular',
+                                                        headers=headers)
+            await raise_for_status(response)
+            loads = partial(cast(Callable[[], object], json.loads), object_hook=JSONObject)
+            result = await cast(Awaitable[object], response.json(loads=loads))
+
+            if not isinstance(result, JSONObject):
+                raise TypeError(f'Bad result type {type(result).__name__}')
+            shows = result.get('results', cls=list)
+            if not shows:
+                raise ValueError('No results')
+            def parse_show(data: object) -> Content:
+                if not isinstance(data, JSONObject):
+                    raise TypeError(f'Bad show type {type(data).__name__}')
+                return Content(title=data.get('name', cls=str))
+            self._shows = [parse_show(data) for data in shows[:10]]
+            self._cache_expires = datetime.now() + self.CACHE_TTL
+            logger.info('Fetched %d show(s) from TMDB', len(self._shows))
+
+        # Work around spurious Any for as target (see https://github.com/python/mypy/issues/13167)
+        except (ClientError, asyncio.TimeoutError, JSONDecodeError, TypeError, # type: ignore[misc]
+                ValueError) as e:
+            if isinstance(e, asyncio.TimeoutError):
+                e = asyncio.TimeoutError('Stalled request')
+            logger.error('Failed to fetch shows from TMDB (%s)', e)
+
+    async def close(self) -> None:
+        """Close the source."""
+        if self._fetch_task:
+            await cancel(self._fetch_task)
+
+class DW:
+    """Deutsche Welle source.
+
+    .. attribute:: CACHE_TTL
+
+       Time to live for cached content.
+    """
+
+    CACHE_TTL = timedelta(days=1)
+
+    def __init__(self) -> None:
+        self._articles = [Content('Digital pet Tamagotchi turns 25')]
+        self._cache_expires = datetime.now()
+        self._fetch_task: Task[None] | None = None
+
+    @property
+    def articles(self) -> list[Content]:
+        """Current news articles, ordered by time, latest first."""
+        if (
+            datetime.now() >= self._cache_expires and
+            (not self._fetch_task or self._fetch_task.done())
+        ):
+            self._fetch_task = create_task(self._fetch())
+        return self._articles
+
+    async def _fetch(self) -> None:
+        logger = getLogger(__name__)
+        try:
+            response = await context.bot.get().http.get('https://rss.dw.com/atom/rss-en-top')
+            await raise_for_status(response)
+            data = await response.read()
+
+            feed = feedparser.parse(data, sanitize_html=False)
+            if feed['bozo']:
+                raise cast(Exception, feed['bozo_exception'])
+            entries = cast(list[dict[str, str]], feed['entries'])
+            if not entries:
+                raise ValueError('No entries')
+            self._articles = [Content(entry.get('title', '')) for entry in entries]
+            self._cache_expires = datetime.now() + self.CACHE_TTL
+            logger.info('Fetched %d article(s) from DW', len(self._articles))
+
+        # Work around spurious Any for as target (see https://github.com/python/mypy/issues/13167)
+        except (ClientError, asyncio.TimeoutError, ThingsNobodyCaresAboutButMe, # type: ignore[misc]
+                SAXParseException, ValueError) as e:
+            if isinstance(e, asyncio.TimeoutError):
+                e = asyncio.TimeoutError('Stalled request')
+            logger.error('Failed to fetch articles from DW (%s)', e)
+
+    async def close(self) -> None:
+        """Close the source."""
+        if self._fetch_task:
+            await cancel(self._fetch_task)
 
 FURNITURE_TYPES = {
     # Toys
