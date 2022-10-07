@@ -34,6 +34,7 @@ class TMDBTest(TestCase):
         tmdb.shows
         await (cast(set[Task[None]], all_tasks()) - {cast(Task[None], current_task())}).pop()
         self.assertGreater(len(tmdb.shows), 1)
+        self.assertRegex(tmdb.shows[0].url, r'^https://www.themoviedb.org/tv/.+')
 
 class DWTest(TestCase):
     async def test_get_articles(self) -> None:
@@ -41,3 +42,4 @@ class DWTest(TestCase):
         self.bot.dw.articles
         await (cast(set[Task[None]], all_tasks()) - {cast(Task[None], current_task())}).pop()
         self.assertGreater(len(self.bot.dw.articles), 1)
+        self.assertRegex(self.bot.dw.articles[0].url, '^https://www.dw.com/en/')

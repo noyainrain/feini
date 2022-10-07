@@ -22,7 +22,7 @@ from aiohttp import ClientResponseError, web
 from aiohttp.test_utils import AioHTTPTestCase
 from aiohttp.web import Application, HTTPNotImplemented, Request, Response
 
-from feini.util import JSONObject, cancel, isemoji, raise_for_status, randstr, truncate
+from feini.util import JSONObject, cancel, collapse, isemoji, raise_for_status, randstr, truncate
 
 class RandstrTest(TestCase):
     def test(self) -> None:
@@ -49,6 +49,11 @@ class IsEmojiTest(TestCase):
 
     def test_string(self) -> None:
         self.assertFalse(isemoji('⭐A'))
+
+class CollapseTest(TestCase):
+    def test(self) -> None:
+        text = collapse('Meow,  meow!\nMeow!␟')
+        self.assertEqual(text, 'Meow, meow! Meow!')
 
 class CancelTest(IsolatedAsyncioTestCase):
     async def test(self) -> None:

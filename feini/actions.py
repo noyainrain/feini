@@ -567,7 +567,10 @@ class MainMode(Mode):
 
     @furniture_action('🪴')
     async def view_houseplant(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice([f'{piece} Good quality!', f'{piece} Beautiful!'])
+        assert isinstance(piece, Houseplant)
+        if piece.state == '🌺':
+            return f'{piece} The plant is in full bloom.'
+        return f'{piece} The plant looks well-cared-for. Is that a new leaf?'
 
     @furniture_action('⛲')
     async def engage_pet_fountain(self, space: Space, piece: Furniture, *args: str) -> str:
@@ -582,15 +585,28 @@ class MainMode(Mode):
 
     @furniture_action('📺')
     async def view_television(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice(['📺 Good quality!', '📺 Beautiful!'])
+        assert isinstance(piece, Television)
+        parts = [f'📺 “{piece.show.title}” is on.', f'({piece.show.url})']
+        if piece.show.summary:
+            parts.insert(1, piece.show.summary)
+        return ' '.join(parts)
 
     @furniture_action('🗞️')
     async def view_newspaper(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice(['🗞️ Good quality!', '🗞️ Beautiful!'])
+        assert isinstance(piece, Newspaper)
+        period = '' if unicodedata.category(piece.article.title[-1]).startswith('P') else '.'
+        parts = [f'🗞️ {piece.article.title}{period}', f'({piece.article.url})']
+        if piece.article.summary:
+            parts.insert(1, f'{piece.article.summary}')
+        return ' '.join(parts)
 
     @furniture_action('🎨')
     async def view_palette(self, space: Space, piece: Furniture, *args: str) -> str:
-        return random.choice([f'{piece} Good quality!', f'{piece} Beautiful!'])
+        assert isinstance(piece, Palette)
+        if piece.state == '🖼️':
+            return (f'{piece} The painting is composed of abstract patterns in vibrant colors, '
+                    'which still evoke a delicate impression of reality.')
+        return f'{piece} There are some thick brushstrokes along the canvas.'
 
     @action('👻')
     async def talk_to_character(self, space: Space, *args: str) -> str:

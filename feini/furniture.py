@@ -37,6 +37,7 @@ from json import JSONDecodeError
 import random
 from typing import cast
 from xml.sax import SAXParseException
+from urllib.parse import urlsplit
 
 from aiohttp import ClientError
 import feedparser
@@ -44,7 +45,7 @@ from feedparser import ThingsNobodyCaresAboutButMe
 
 from . import context
 from .core import Entity
-from .util import JSONObject, cancel, raise_for_status
+from .util import JSONObject, cancel, collapse, raise_for_status
 
 FURNITURE_MATERIAL = {
     # Toys
@@ -193,22 +194,39 @@ class Content:
     .. attribute:: title
 
        Title of the content.
+
+    .. attribute:: url
+
+       URL of the content or information about it.
+
+    .. attribute:: summary
+
+       Short summary.
     """
 
     title: str
+    url: str
+    summary: str | None = None
 
     def __post_init__(self) -> None:
-        self.title = self.title.strip()
+        self.title = collapse(self.title)
         if not self.title:
             raise ValueError('Blank title')
+        if not urlsplit(self.url).scheme:
+            raise ValueError(f'Relative URL {self.url}')
+        self.summary = collapse(self.summary) or None if self.summary else None
 
     @staticmethod
     def parse(data: str) -> Content:
         """Parse the string representation *data* into media content."""
-        return Content(data)
+        try:
+            title, url, summary = data.split('␟')
+        except ValueError:
+            raise ValueError('Bad data format') from None
+        return Content(title, url, summary or None)
 
     def __str__(self) -> str:
-        return self.title
+        return '␟'.join([self.title, self.url, self.summary or ''])
 
 class TMDB:
     """The Movie Database source.
@@ -226,7 +244,9 @@ class TMDB:
 
     def __init__(self, *, key: str | None = None) -> None:
         self.key = key
-        self._shows = [Content('Buffy the Vampire Slayer')]
+        self._shows = [
+            Content('Buffy the Vampire Slayer',
+                    'https://www.themoviedb.org/tv/95-buffy-the-vampire-slayer')]
         self._cache_expires = datetime.now()
         self._fetch_task: Task[None] | None = None
 
@@ -261,7 +281,10 @@ class TMDB:
             def parse_show(data: object) -> Content:
                 if not isinstance(data, JSONObject):
                     raise TypeError(f'Bad show type {type(data).__name__}')
-                return Content(title=data.get('name', cls=str))
+                show_id = data.get('id', cls=int)
+                return Content(
+                    title=data.get('name', cls=str), url=f'https://www.themoviedb.org/tv/{show_id}',
+                    summary=data.get('overview', cls=str))
             self._shows = [parse_show(data) for data in shows[:10]]
             self._cache_expires = datetime.now() + self.CACHE_TTL
             logger.info('Fetched %d show(s) from TMDB', len(self._shows))
@@ -289,7 +312,9 @@ class DW:
     CACHE_TTL = timedelta(days=1)
 
     def __init__(self) -> None:
-        self._articles = [Content('Digital pet Tamagotchi turns 25')]
+        self._articles = [
+            Content('Digital pet Tamagotchi turns 25',
+                    'https://www.dw.com/en/digital-pet-tamagotchi-turns-25/a-61709227')]
         self._cache_expires = datetime.now()
         self._fetch_task: Task[None] | None = None
 
@@ -316,7 +341,11 @@ class DW:
             entries = cast(list[dict[str, str]], feed['entries'])
             if not entries:
                 raise ValueError('No entries')
-            self._articles = [Content(entry.get('title', '')) for entry in entries]
+            self._articles = [
+                Content(title=entry.get('title', ''), url=entry.get('link', ''),
+                        summary=entry.get('summary'))
+                for entry in entries
+            ]
             self._cache_expires = datetime.now() + self.CACHE_TTL
             logger.info('Fetched %d article(s) from DW', len(self._articles))
 

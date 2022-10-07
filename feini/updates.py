@@ -19,10 +19,34 @@
 # pylint: disable=missing-function-docstring
 
 from logging import getLogger
+import random
 
 from . import context
+from .furniture import Content
 from .space import Space
 from .util import randstr
+
+async def update_content_url() -> None:
+    updates = 0
+    bot = context.bot.get()
+    redis = bot.redis
+    for space_id in await redis.hvals('spaces_by_chat'):
+        for furniture_id in await redis.lrange(f'{space_id}.items', 0, -1):
+            show, article = await redis.hmget(furniture_id, 'show', 'article')
+            if show:
+                try:
+                    Content.parse(show)
+                except ValueError:
+                    await redis.hset(furniture_id, 'show', str(random.choice(bot.tmdb.shows)))
+                    updates += 1
+            elif article:
+                try:
+                    Content.parse(article)
+                except ValueError:
+                    await redis.hset(furniture_id, 'article', str(random.choice(bot.dw.articles)))
+                    updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Content.url (%d)', updates)
 
 async def update_pet_name() -> None:
     updates = 0

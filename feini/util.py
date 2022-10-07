@@ -47,6 +47,13 @@ def truncate(text: str, length: int = 16) -> str:
     """
     return f'{text[:length - 1]}…' if len(text) > length else text
 
+def collapse(text: str) -> str:
+    """Collapse sequences of white space characters in *text*.
+
+    ASCII delimiters are considered white space.
+    """
+    return re.sub(r'[\s␜-␟]+', ' ', text).strip()
+
 def isemoji(char: str) -> bool:
     """Guess if *char* is an emoji.
 
