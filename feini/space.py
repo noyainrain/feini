@@ -36,6 +36,12 @@ from .core import Entity
 from .furniture import Furniture, FURNITURE_TYPES, FURNITURE_MATERIAL
 from .util import randstr
 
+from typing import TypeVar
+from collections.abc import Callable, Awaitable
+from inspect import iscoroutinefunction
+
+_F = TypeVar('_F', bound=Callable[..., object])
+
 if TYPE_CHECKING:
     from .stories import Story
 
@@ -501,9 +507,30 @@ class Pet(Entity):
         self.hatched = bool(data['hatched'])
         self.nutrition = int(data['nutrition'])
         self.dirt = int(data['dirt'])
+
+        # 72 full feeling of reciprocity -> be content :)
+        # |
+        # 0  no feeling of reciprocity   -> need to contact the player => nudge()
+        # |
+        # -x waiting for player to respond => go up to full / 72 again
+
+        # TODO reset recirprocity on any player interaction with the pet
+
+        self.reciprocity = int(data['reciprocity'])
         self.fur = int(data['fur'])
         self.clothing = data['clothing'] or None
         self.activity_id = data['activity_id']
+
+    @staticmethod
+    def social(f: _F) -> _F: # type: ignore[misc]
+        """TODO."""
+        async def _f(*args: object, **kwargs: object) -> object:
+            assert iscoroutinefunction(f) # type: ignore[misc]
+            result = await cast(Awaitable[object], f(*args, **kwargs))
+            assert isinstance(args[0], Pet)
+            print('social', args[0].id)
+            return result
+        return cast(_F, _f) # type: ignore[misc]
 
     async def get_space(self) -> Space:
         """Get the space the pet inhabits."""
@@ -521,16 +548,20 @@ class Pet(Entity):
         bot = context.bot.get()
         async with bot.redis.pipeline() as pipe:
             await pipe.watch(self.id)
-            values = await pipe.hmget(self.id, 'nutrition', 'dirt')
+            values = await pipe.hmget(self.id, 'nutrition', 'dirt', 'reciprocity')
             if not values:
                 raise ReferenceError(self.id)
             nutrition = int(values[0] or '')
             dirt = int(values[1] or '')
+            reciprocity = int(values[2] or '')
 
             pipe.multi()
             nutrition -= 1
             dirt += 1
-            pipe.hset(self.id, mapping={'nutrition': nutrition, 'dirt': dirt})
+            reciprocity -= 1
+            print('TICK', reciprocity)
+            pipe.hset(self.id,
+                      mapping={'nutrition': nutrition, 'dirt': dirt, 'reciprocity': reciprocity})
             pipe.hincrby(self.id, 'fur', 1)
             if nutrition == 0:
                 pipe.rpush('events', str(Event('pet-hungry', self.space_id)))
@@ -540,8 +571,21 @@ class Pet(Entity):
 
         space = await self.get_space()
         furniture = await space.get_furniture()
-        activities: list[Furniture | str] = ['', *self.ACTIVITIES, *furniture]
-        await self.engage(random.choice(activities))
+        if reciprocity == 0:
+            await self._set_activity('')
+            activities: list[Furniture | str] = ['', *furniture]
+            activity = random.choice(activities)
+            if isinstance(activity, Furniture):
+                activity = activity.type
+            print('EVENT (', activity, ')')
+            # OQ should we create a method called nudge()?
+            # OQ enhance our event system to also have arguments? (yes, I think so)
+            # XXX
+            await bot.redis.rpush('events', f'space-nudge-{activity} {self.space_id}')
+        else:
+            activities = ['', *self.ACTIVITIES, *furniture]
+            # await self.engage(random.choice(activities))
+            await self._set_activity(random.choice(activities))
 
     async def touch(self) -> None:
         """Touch the pet.
@@ -550,6 +594,9 @@ class Pet(Entity):
         """
         await context.bot.get().redis.hset(self.id, 'hatched', 'true')
 
+        await self._reset_reciprocity()
+
+    @social # type: ignore[misc]
     async def feed(self, food: str) -> None:
         """Feed the pet with *food*."""
         if food not in Space.ITEM_CATEGORIES['food']:
@@ -574,6 +621,8 @@ class Pet(Entity):
             pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
 
+        await self._reset_reciprocity()
+
     async def wash(self) -> None:
         """Wash the pet."""
         async with context.bot.get().redis.pipeline() as pipe:
@@ -587,6 +636,8 @@ class Pet(Entity):
             pipe.multi()
             pipe.hset(self.id, 'dirt', 0)
             await pipe.execute()
+
+        await self._reset_reciprocity()
 
     async def dress(self, clothing: str | None) -> None:
         """Dress the pet in the given *clothing*."""
@@ -614,6 +665,8 @@ class Pet(Entity):
             pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
 
+        await self._reset_reciprocity()
+
     async def shear(self) -> list[str]:
         """Shear available wool from the pet and return a receipt."""
         async with context.bot.get().redis.pipeline() as pipe:
@@ -636,7 +689,11 @@ class Pet(Entity):
                 pipe.hset(self.id, 'fur', 0)
                 pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
-            return wool
+
+        # OQ: what should we do if the pet does not like the action?
+        await self._reset_reciprocity()
+
+        return wool
 
     async def change_name(self, name: str) -> None:
         """Rename the pet to the given *name*."""
@@ -645,8 +702,15 @@ class Pet(Entity):
             raise ValueError(f'Blank name {name}')
         await context.bot.get().redis.hset(self.id, 'name', name)
 
+        await self._reset_reciprocity()
+
     async def engage(self, activity: Furniture | str) -> None:
         """Engage the pet in the given *activity*."""
+        await self._set_activity(activity)
+
+        await self._reset_reciprocity()
+
+    async def _set_activity(self, activity: Furniture | str) -> None:
         async with context.bot.get().redis.pipeline() as pipe:
             if isinstance(activity, Furniture):
                 await pipe.watch(activity.id)
@@ -664,8 +728,25 @@ class Pet(Entity):
         if isinstance(activity, Furniture):
             await activity.use()
 
+    async def _reset_reciprocity(self) -> None:
+        async with context.bot.get().redis.pipeline() as pipe:
+            await pipe.watch(self.id)
+            reciprocity = int(await pipe.hget(self.id, 'reciprocity') or '')
+            pipe.multi()
+            if reciprocity < 0:
+                # TODO 24 / 72 should be a constant
+                pipe.hset(self.id, 'reciprocity', 24)
+                print('RESET RECIPROCITY TO 24')
+            await pipe.execute()
+
+        # await context.bot.get().redis.hset(self.id, 'reciprocity', 24)
+
     def __str__(self) -> str:
         return f"🐕{self.clothing or ''}"
+
+#reveal_type(Pet.social)
+#reveal_type(Pet.feed)
+#reveal_type(Pet.wash)
 
 @dataclass
 class Event:

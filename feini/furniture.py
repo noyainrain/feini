@@ -361,18 +361,19 @@ class DW:
         if self._fetch_task:
             await cancel(self._fetch_task)
 
+# OQ: should there be different messages depending if the furniture action is engage or view
 FURNITURE_TYPES = {
     # Toys
-    '🪃': Furniture,
-    '⚾': Furniture,
-    '🧸': Furniture,
+    '🪃': Furniture,  # carry
+    '⚾': Furniture,  # carry
+    '🧸': Furniture,  # carry
     # Furniture
-    '🛋️': Furniture,
-    '🪴': Houseplant,
-    '⛲': Furniture,
+    '🛋️': Furniture,  # call
+    '🪴': Houseplant, # call
+    '⛲': Furniture,  # call
     # Devices
-    '📺': Television,
+    '📺': Television, # call
     # Miscellaneous
-    '🗞️': Newspaper,
-    '🎨': Palette
+    '🗞️': Newspaper,  # carry
+    '🎨': Palette     # call
 }

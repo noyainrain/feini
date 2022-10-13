@@ -26,6 +26,10 @@ from .furniture import Content
 from .space import Event, Space
 from .util import randstr
 
+async def update_pet_reciprocity() -> None:
+    # TODO
+    pass
+
 async def update_event_format() -> None:
     updates = 0
     redis = context.bot.get().redis

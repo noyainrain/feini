@@ -273,6 +273,7 @@ class Bot:
                 'hatched': '',
                 'nutrition': str(8 - 1),
                 'dirt': str(Pet.DIRT_MAX - (8 - 1)),
+                'reciprocity': '-1',
                 'fur': '0',
                 'clothing': '',
                 'activity_id': ''
