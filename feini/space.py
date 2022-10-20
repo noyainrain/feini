@@ -579,9 +579,9 @@ class Pet(Entity):
                 activity = activity.type
             print('EVENT (', activity, ')')
             # OQ should we create a method called nudge()?
-            # OQ enhance our event system to also have arguments? (yes, I think so)
-            # XXX
-            await bot.redis.rpush('events', f'space-nudge-{activity} {self.space_id}')
+            # await bot.redis.rpush('events', f'space-nudge-{activity} {self.space_id}')
+            await bot.redis.rpush('events',
+                                  str(NudgeEvent('space-nudge', self.space_id, activity)))
         else:
             activities = ['', *self.ACTIVITIES, *furniture]
             # await self.engage(random.choice(activities))
@@ -779,6 +779,52 @@ class Event:
 
     def __str__(self) -> str:
         return '␟'.join([type(self).__name__, self.type, self.space_id])
+
+    #@classmethod
+    #def xparse(cls, data: str) -> Event:
+    #    tokens = data.split('␟')
+    #    return cls(*cls.decode(tokens))
+
+    #def xstr(self) -> str:
+    #    return '␟'.join(self.encode())
+
+    #@staticmethod
+    #def decode(data: list[str]) -> tuple[str, str]:
+    #    if len(data) != 2:
+    #        raise ValueError('...')
+    #    return data[1], data[2]
+
+    #def encode(self) -> list[str]:
+    #    return [type(self).__name__, self.type, self.space_id]
+
+@dataclass
+class NudgeEvent(Event):
+    """Event about a nudge from the pet.
+
+    .. attribute:: activity_id
+
+       Activity emoji or ID of the furniture piece to engage with.
+    """
+
+    activity_id: str
+
+    @staticmethod
+    def parse(data: str) -> NudgeEvent:
+        try:
+            _, typ, space_id, activity_id = data.split('␟')
+        except ValueError:
+            raise ValueError('Bad data format') from None
+        return NudgeEvent(typ, space_id, activity_id)
+
+    async def get_activity(self) -> Furniture | str:
+        """Get the activity emoji or ID of the furniture piece to engage with."""
+        try:
+            return await context.bot.get().get_furniture_item(self.activity_id)
+        except ValueError:
+            return self.activity_id
+
+    def __str__(self) -> str:
+        return '␟'.join([type(self).__name__, self.type, self.space_id, self.activity_id])
 
 @dataclass
 class Message:

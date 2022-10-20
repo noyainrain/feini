@@ -820,23 +820,33 @@ class HikeMode(Mode):
 # @event_message('space-nudge-fixed')
 # ...
 
-@event_message('space-nudge-')
-async def pet_space_nudge_message(space: Space) -> str:
-    pet = await space.get_pet()
-    return pet_message(pet, f'{pet.name} nudges you with its cute little nose!', mood='😊')
+from .space import NudgeEvent
 
-@event_message('space-nudge-⚾')
-async def pet_space_nudge_ball_message(space: Space) -> str:
+@event_message('space-nudge')
+async def space_nudge_message(event: Event) -> str:
+    assert isinstance(event, NudgeEvent)
+    activity = await event.get_activity()
+    space = await event.get_space()
     pet = await space.get_pet()
-    # OQ should the focus of the pet be on the ball / furniture item
-    return pet_message(
-        pet, f'{pet.name} drops the ball ⚾ next to you and looks at you full of expectation.',
-        mood='😊')
+    return pet_message(pet, f'{pet.name} nudges you towards {activity}')
 
-@event_message('space-nudge-📺')
-async def pet_space_nudge_tv_message(space: Space) -> str:
-    pet = await space.get_pet()
-    return pet_message(pet, f'{pet.name} calls you over to the television 📺. {speak()}', mood='😊')
+#@event_message('space-nudge-')
+#async def pet_space_nudge_message(space: Space) -> str:
+#    pet = await space.get_pet()
+#    return pet_message(pet, f'{pet.name} nudges you with its cute little nose!', mood='😊')
+#
+#@event_message('space-nudge-⚾')
+#async def pet_space_nudge_ball_message(space: Space) -> str:
+#    pet = await space.get_pet()
+#    # OQ should the focus of the pet be on the ball / furniture item
+#    return pet_message(
+#        pet, f'{pet.name} drops the ball ⚾ next to you and looks at you full of expectation.',
+#        mood='😊')
+#
+#@event_message('space-nudge-📺')
+#async def pet_space_nudge_tv_message(space: Space) -> str:
+#    pet = await space.get_pet()
+#    return pet_message(pet, f'{pet.name} calls you over to the television 📺. {speak()}', mood='😊')
 
 # TODO: messages for other furniture items
 
