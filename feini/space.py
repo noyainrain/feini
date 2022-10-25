@@ -500,6 +500,9 @@ class Pet(Entity):
     FUR_MAX = 8 - 1
     ACTIVITIES = {'💤', '🍃'}
 
+    RECIPROCITY_MAX = 72
+    RECIPROCITY_MAX = 24
+
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
         self.space_id = data['space_id']
@@ -524,13 +527,26 @@ class Pet(Entity):
     @staticmethod
     def social(f: _F) -> _F: # type: ignore[misc]
         """TODO."""
-        async def _f(*args: object, **kwargs: object) -> object:
+        async def wrapper(*args: object, **kwargs: object) -> object:
             assert iscoroutinefunction(f) # type: ignore[misc]
+            # any exception is just passed through - no need to refill the reciprocity level
             result = await cast(Awaitable[object], f(*args, **kwargs))
-            assert isinstance(args[0], Pet)
-            print('social', args[0].id)
+
+            print('PRE RECIPROCITY REFILL')
+            # TODO some note about race conditions
+            self = args[0]
+            assert isinstance(self, Pet)
+            async with context.bot.get().redis.pipeline() as pipe:
+                await pipe.watch(self.id)
+                reciprocity = int(await pipe.hget(self.id, 'reciprocity') or '')
+                pipe.multi()
+                if reciprocity <= 0:
+                    pipe.hset(self.id, 'reciprocity', self.RECIPROCITY_MAX)
+                    print('RESET RECIPROCITY TO 24')
+                await pipe.execute()
+
             return result
-        return cast(_F, _f) # type: ignore[misc]
+        return cast(_F, wrapper) # type: ignore[misc]
 
     async def get_space(self) -> Space:
         """Get the space the pet inhabits."""
@@ -587,14 +603,13 @@ class Pet(Entity):
             # await self.engage(random.choice(activities))
             await self._set_activity(random.choice(activities))
 
+    @social # type: ignore[misc]
     async def touch(self) -> None:
         """Touch the pet.
 
         If the pet is still an egg, it hatches.
         """
         await context.bot.get().redis.hset(self.id, 'hatched', 'true')
-
-        await self._reset_reciprocity()
 
     @social # type: ignore[misc]
     async def feed(self, food: str) -> None:
@@ -621,8 +636,7 @@ class Pet(Entity):
             pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
 
-        await self._reset_reciprocity()
-
+    @social # type: ignore[misc]
     async def wash(self) -> None:
         """Wash the pet."""
         async with context.bot.get().redis.pipeline() as pipe:
@@ -637,8 +651,7 @@ class Pet(Entity):
             pipe.hset(self.id, 'dirt', 0)
             await pipe.execute()
 
-        await self._reset_reciprocity()
-
+    @social # type: ignore[misc]
     async def dress(self, clothing: str | None) -> None:
         """Dress the pet in the given *clothing*."""
         if clothing and clothing not in Space.ITEM_CATEGORIES['clothing']:
@@ -665,8 +678,7 @@ class Pet(Entity):
             pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
 
-        await self._reset_reciprocity()
-
+    @social # type: ignore[misc]
     async def shear(self) -> list[str]:
         """Shear available wool from the pet and return a receipt."""
         async with context.bot.get().redis.pipeline() as pipe:
@@ -690,11 +702,9 @@ class Pet(Entity):
                 pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
 
-        # OQ: what should we do if the pet does not like the action?
-        await self._reset_reciprocity()
-
         return wool
 
+    @social # type: ignore[misc]
     async def change_name(self, name: str) -> None:
         """Rename the pet to the given *name*."""
         name = name.strip()
@@ -702,13 +712,10 @@ class Pet(Entity):
             raise ValueError(f'Blank name {name}')
         await context.bot.get().redis.hset(self.id, 'name', name)
 
-        await self._reset_reciprocity()
-
+    @social # type: ignore[misc]
     async def engage(self, activity: Furniture | str) -> None:
         """Engage the pet in the given *activity*."""
         await self._set_activity(activity)
-
-        await self._reset_reciprocity()
 
     async def _set_activity(self, activity: Furniture | str) -> None:
         async with context.bot.get().redis.pipeline() as pipe:
