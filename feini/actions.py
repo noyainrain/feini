@@ -32,7 +32,8 @@ from typing import ClassVar, Generic, Protocol, TypeVar, cast, overload
 import unicodedata
 
 from . import context
-from .furniture import Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL
+from .furniture import (Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL,
+                        FURNITURE_PROPERTIES)
 from .space import Event, Hike, Pet, Space, CHARACTER_NAMES
 from .util import isemoji
 
@@ -826,9 +827,22 @@ from .space import NudgeEvent
 async def space_nudge_message(event: Event) -> str:
     assert isinstance(event, NudgeEvent)
     activity = await event.get_activity()
+    print('ACTIVITY', activity)
+    print('TYPE ACTIVITY', type(activity))
     space = await event.get_space()
     pet = await space.get_pet()
-    return pet_message(pet, f'{pet.name} nudges you towards {activity}')
+    if isinstance(activity, str):
+        return pet_message(pet, f'{pet.name} gently nudges you with its head.', mood='😊')
+    # if FURNITURE_PROPERTIES[activity.type]['portable']:
+    if activity.portable:
+        return pet_message(
+            pet,
+            f'{pet.name} drops the {activity} item at your feet and looks at you with '
+            f'anticipation. {speak()}',
+            focus=str(activity), mood='😊')
+    return pet_message(
+        pet, f'{pet.name} calls you over to the {activity} furniture piece. {speak()}',
+        focus=str(activity), mood='😊')
 
 #@event_message('space-nudge-')
 #async def pet_space_nudge_message(space: Space) -> str:

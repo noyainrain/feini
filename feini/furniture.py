@@ -21,6 +21,10 @@
 .. data:: FURNITURE_TYPES
 
    Furniture classes.
+
+.. data:: FURNITURE_PROPERTIES
+
+   Properties of each furniture piece.
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ from functools import partial
 import json
 from json import JSONDecodeError
 import random
-from typing import cast
+from typing import TypedDict, cast
 from xml.sax import SAXParseException
 from urllib.parse import urlsplit
 
@@ -74,6 +78,11 @@ class Furniture(Entity):
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
         self.type = data['type']
+
+    @property
+    def portable(self) -> bool:
+        """TODO."""
+        return FURNITURE_PROPERTIES[self.type]['portable']
 
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Furniture:
@@ -376,4 +385,30 @@ FURNITURE_TYPES = {
     # Miscellaneous
     '🗞️': Newspaper,  # carry
     '🎨': Palette     # call
+}
+
+class FurnitureProperties(TypedDict):
+    """Properties of a furniture piece.
+
+    .. attribute:: portable
+
+       Indicates if the furniture piece is portable or fixed.
+    """
+
+    portable: bool
+
+FURNITURE_PROPERTIES: dict[str, FurnitureProperties] = {
+    # Toys
+    '🪃': {'portable': True},
+    '⚾': {'portable': True},
+    '🧸': {'portable': True},
+    # Furniture
+    '🛋️': {'portable': False},
+    '🪴': {'portable': False},
+    '⛲': {'portable': False},
+    # Devices
+    '📺': {'portable': False},
+    # Miscellaneous
+    '🗞️': {'portable': True},
+    '🎨': {'portable': False}
 }

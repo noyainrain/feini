@@ -27,8 +27,21 @@ from .space import Event, Space
 from .util import randstr
 
 async def update_pet_reciprocity() -> None:
-    # TODO
-    pass
+    updates = 0
+    redis = context.bot.get().redis
+    for space_id in await redis.hvals('spaces_by_chat'):
+        pet_id = await redis.hget(space_id, 'pet_id')
+        assert pet_id
+        if not await redis.hexists(pet_id, 'reciprocity'):
+            hatched = bool(await redis.hget(pet_id, 'hatched'))
+            # OQ should we set to maximum value if the pet is hatched?
+            #   PRO notification about new feature (= without player interaction)
+            #   CON additional check
+            # OQ should we directly emit the nudge event?
+            await redis.hset(pet_id, 'reciprocity', '1' if hatched else '0')
+            updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Pet.reciprocity (%d)', updates)
 
 async def update_event_format() -> None:
     updates = 0

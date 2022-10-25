@@ -17,7 +17,7 @@
 from itertools import cycle, islice
 
 from feini.furniture import Houseplant, FURNITURE_MATERIAL
-from feini.space import Hike, Pet, Space
+from feini.space import Hike, NudgeEvent, Pet, Space
 from feini.stories import SewingStory
 from .test_bot import TestCase
 
@@ -125,15 +125,20 @@ class PetTest(TestCase):
         self.assertEqual(pet.nutrition, (8 - 1) - 1)
         self.assertEqual(pet.dirt, Pet.DIRT_MAX - (8 - 1) + 1)
         self.assertEqual(pet.fur, 1)
+        self.assertEqual(pet.reciprocity, 0 - 1)
 
     async def test_tick_later_time(self) -> None:
+        await self.pet.touch()
         await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
         await self.space.craft('🪴')
-        for _ in range(7):
+        # for _ in range(7):
+        for _ in range(Pet.RECIPROCITY_MAX):
             await self.pet.tick()
-        self.assertEqual(len(self.events), 2)
+        self.assertEqual(len(self.events), 3)
         self.assertEqual(self.events[0].type, 'pet-hungry')
         self.assertEqual(self.events[1].type, 'pet-dirty')
+        self.assertIsInstance(self.events[2], NudgeEvent)
+        self.assertEqual(self.events[2].type, 'space-nudge')
 
         for _ in range(self.TRIALS):
             pet = await self.pet.get()
@@ -147,6 +152,7 @@ class PetTest(TestCase):
         await self.pet.touch()
         pet = await self.pet.get()
         self.assertTrue(pet.hatched)
+        self.assertEqual(pet.reciprocity, Pet.RECIPROCITY_MAX)
 
     async def test_feed(self) -> None:
         await self.space.obtain('🥕', '🥕')

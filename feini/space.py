@@ -115,6 +115,10 @@ class Space(Entity):
     .. attribute:: BLUEPRINT_WEIGHTS
 
        Weights by which blueprints are ordered.
+
+    .. describe:: space-nudge
+
+       Dispatched when the pet nudges the player.
     """
 
     MEADOW_VEGETABLE_GROWTH_MAX = 8 - 1
@@ -470,6 +474,10 @@ class Pet(Entity):
 
        Current fur growth level.
 
+    .. attribute:: reciprocity
+
+       Current reciprocity level of the relationship to the player.
+
     .. attribute:: clothing
 
        Clothing the pet is wearing.
@@ -490,6 +498,10 @@ class Pet(Entity):
 
        Level at which the fur is fully grown.
 
+    .. attribute:: RECIPROCITY_MAX
+
+       Level at which the relationship with the player feels completely reciprocal.
+
     .. attribute:: ACTIVITIES
 
        Available stand-alone activities.
@@ -498,10 +510,9 @@ class Pet(Entity):
     NUTRITION_MAX = 24 + 1
     DIRT_MAX = 48 + 1
     FUR_MAX = 8 - 1
+    # RECIPROCITY_MAX = 72
+    RECIPROCITY_MAX = 5
     ACTIVITIES = {'💤', '🍃'}
-
-    RECIPROCITY_MAX = 72
-    RECIPROCITY_MAX = 24
 
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
@@ -517,16 +528,17 @@ class Pet(Entity):
         # |
         # -x waiting for player to respond => go up to full / 72 again
 
-        # TODO reset recirprocity on any player interaction with the pet
-
-        self.reciprocity = int(data['reciprocity'])
         self.fur = int(data['fur'])
+        self.reciprocity = int(data['reciprocity'])
         self.clothing = data['clothing'] or None
         self.activity_id = data['activity_id']
 
     @staticmethod
     def social(f: _F) -> _F: # type: ignore[misc]
-        """TODO."""
+        """Decorator to make a social interaction between the player and the pet.
+
+        Social interactions influence the :attr:`reciprocity`.
+        """
         async def wrapper(*args: object, **kwargs: object) -> object:
             assert iscoroutinefunction(f) # type: ignore[misc]
             # any exception is just passed through - no need to refill the reciprocity level
@@ -540,6 +552,7 @@ class Pet(Entity):
                 await pipe.watch(self.id)
                 reciprocity = int(await pipe.hget(self.id, 'reciprocity') or '')
                 pipe.multi()
+                # Pet just contacted the player
                 if reciprocity <= 0:
                     pipe.hset(self.id, 'reciprocity', self.RECIPROCITY_MAX)
                     print('RESET RECIPROCITY TO 24')
@@ -592,7 +605,7 @@ class Pet(Entity):
             activities: list[Furniture | str] = ['', *furniture]
             activity = random.choice(activities)
             if isinstance(activity, Furniture):
-                activity = activity.type
+                activity = activity.id
             print('EVENT (', activity, ')')
             # OQ should we create a method called nudge()?
             # await bot.redis.rpush('events', f'space-nudge-{activity} {self.space_id}')
@@ -810,7 +823,7 @@ class NudgeEvent(Event):
 
     .. attribute:: activity_id
 
-       Activity emoji or ID of the furniture piece to engage with.
+       Intended activity emoji or ID of the furniture piece to engage with.
     """
 
     activity_id: str
@@ -824,7 +837,7 @@ class NudgeEvent(Event):
         return NudgeEvent(typ, space_id, activity_id)
 
     async def get_activity(self) -> Furniture | str:
-        """Get the activity emoji or ID of the furniture piece to engage with."""
+        """Get the intended activity emoji or furniture piece to engage with."""
         try:
             return await context.bot.get().get_furniture_item(self.activity_id)
         except ValueError:
