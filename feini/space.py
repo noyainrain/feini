@@ -511,7 +511,7 @@ class Pet(Entity):
     DIRT_MAX = 48 + 1
     FUR_MAX = 8 - 1
     # RECIPROCITY_MAX = 72
-    RECIPROCITY_MAX = 5
+    RECIPROCITY_MAX = 10
     ACTIVITIES = {'💤', '🍃'}
 
     def __init__(self, data: dict[str, str]) -> None:
@@ -554,7 +554,7 @@ class Pet(Entity):
                 pipe.multi()
                 # Pet just contacted the player
                 if reciprocity <= 0:
-                    pipe.hset(self.id, 'reciprocity', self.RECIPROCITY_MAX)
+                    pipe.hset(self.id, 'reciprocity', self.RECIPROCITY_MAX + randint(-2, 2))
                     print('RESET RECIPROCITY TO 24')
                 await pipe.execute()
 
