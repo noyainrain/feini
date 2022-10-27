@@ -16,7 +16,7 @@
 
 from . import context
 from .core import Entity
-from .space import Message, Pet, Space
+from .space import Event, Message, Pet, Space
 from .util import randstr
 
 class Story(Entity):
@@ -71,19 +71,19 @@ class IntroStory(Story):
             pipe.multi()
             if chapter == 'start':
                 pipe.hset(self.id, mapping={'chapter': 'touch', 'update_time': bot.time})
-                pipe.rpush('events', f'space-explain-touch {self.space_id}')
+                pipe.rpush('events', str(Event('space-explain-touch', self.space_id)))
             elif chapter == 'touch' and hatched:
                 pipe.hset(self.id, mapping={'chapter': 'gather', 'update_time': bot.time})
-                pipe.rpush('events', f'space-explain-gather {self.space_id}')
+                pipe.rpush('events', str(Event('space-explain-gather', self.space_id)))
             elif chapter == 'gather' and '🥕' in items:
                 pipe.hset(self.id, mapping={'chapter': 'feed', 'update_time': bot.time})
-                pipe.rpush('events', f'space-explain-feed {self.space_id}')
+                pipe.rpush('events', str(Event('space-explain-feed', self.space_id)))
             elif chapter == 'feed' and nutrition >= Pet.NUTRITION_MAX:
                 pipe.hset(self.id, mapping={'chapter': 'craft', 'update_time': bot.time})
-                pipe.rpush('events', f'space-explain-craft {self.space_id}')
+                pipe.rpush('events', str(Event('space-explain-craft', self.space_id)))
             elif chapter == 'craft' and '🪓' in tools:
                 pipe.srem(f'{self.space_id}.stories', self.id)
-                pipe.rpush('events', f'space-explain-basics {self.space_id}')
+                pipe.rpush('events', str(Event('space-explain-basics', self.space_id)))
             await pipe.execute()
 
 class SewingStory(Story):
@@ -124,7 +124,7 @@ class SewingStory(Story):
                 pipe.rpush(f'{character_id}.dialogue', *(message.encode() for message in dialogue))
                 pipe.rpush(f'{self.space_id}.characters', character_id)
                 pipe.hset(self.id, mapping={'chapter': 'quest', 'update_time': bot.time})
-                pipe.rpush('events', f'space-visit-ghost {self.space_id}')
+                pipe.rpush('events', str(Event('space-visit-ghost', self.space_id)))
             elif (chapter == 'quest' and
                   message.id in {'ghost-sewing-blueprint', 'ghost-sewing-goodbye'}):
                 pipe.zadd(f'{self.space_id}.blueprints', {'🪡': Space.BLUEPRINT_WEIGHTS['🪡']})

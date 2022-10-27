@@ -33,7 +33,7 @@ import unicodedata
 
 from . import context
 from .furniture import Furniture, Houseplant, Newspaper, Palette, Television, FURNITURE_MATERIAL
-from .space import Hike, Pet, Space, CHARACTER_NAMES
+from .space import Event, Hike, Pet, Space, CHARACTER_NAMES
 from .util import isemoji
 
 ngettext = NullTranslations().ngettext
@@ -147,7 +147,7 @@ def furniture_action(furniture_type: str) -> Callable[[_FurnitureActionCallable]
     return decorator
 
 class EventMessageFunc:
-    """Write a message about an event in *space*.
+    """Write a message about an *event*.
 
     .. attribute:: func
 
@@ -158,16 +158,16 @@ class EventMessageFunc:
        Type of event handled by the function.
     """
 
-    def __init__(self, func: Callable[[Space], Awaitable[str]], event_type: str) -> None:
+    def __init__(self, func: Callable[[Event], Awaitable[str]], event_type: str) -> None:
         self.func = func
         self.event_type = event_type
 
-    async def __call__(self, space: Space) -> str:
-        return await self.func(space)
+    async def __call__(self, event: Event) -> str:
+        return await self.func(event)
 
 def event_message(
     event_type: str
-) -> Callable[[Callable[[Space], Awaitable[str]]], EventMessageFunc]:
+) -> Callable[[Callable[[Event], Awaitable[str]]], EventMessageFunc]:
     """Decorator to define an event message function about *event_type* events."""
     return partial(EventMessageFunc, event_type=event_type)
 
@@ -816,64 +816,75 @@ class HikeMode(Mode):
         """)
 
 @event_message('pet-hungry')
-async def pet_hungry_message(space: Space) -> str:
+async def pet_hungry_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return pet_message(pet, f'{pet.name} looks hungry. {speak()}', focus='🍽️')
 
 @event_message('pet-dirty')
-async def pet_dirty_message(space: Space) -> str:
+async def pet_dirty_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return pet_message(pet, f'{pet.name} is pretty dirty.', focus='💩')
 
 @event_message('space-explain-touch')
-async def space_explain_touch_message(space: Space) -> str:
+async def space_explain_touch_message(event: Event) -> str:
     return 'ℹ️ You can touch the egg by sending a 👋 emoji. What will happen?'
 
 @event_message('space-explain-gather')
-async def space_explain_gather_message(space: Space) -> str:
+async def space_explain_gather_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return f'ℹ️ {pet.name} looks hungry. You can gather some veggies with 🧺.'
 
 @event_message('space-explain-feed')
-async def space_explain_feed_message(space: Space) -> str:
+async def space_explain_feed_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return f'ℹ️ You can now feed {pet.name} with 🥕.'
 
 @event_message('space-explain-craft')
-async def space_explain_craft_message(space: Space) -> str:
+async def space_explain_craft_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return (f'ℹ️ You can craft tools and furniture for {pet.name} with 🔨. You can currently '
             'afford to craft an axe with 🔨🪓.')
 
 @event_message('space-explain-basics')
-async def space_explain_basics_message(space: Space) -> str:
+async def space_explain_basics_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return ('ℹ️ All items are placed in the tent. You can view it with ⛺. You can watch and pet '
             f'{pet.name} any time with 👋.')
 
 @event_message('space-visit-ghost')
-async def space_visit_ghost_message(space: Space) -> str:
+async def space_visit_ghost_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return pet_message(pet, f'{pet.name} has seen a ghost. {speak()}', focus='👻', mood='😮')
 
 @event_message('space-stroll-compass-blueprint')
-async def space_stroll_compass_blueprint_message(space: Space) -> str:
+async def space_stroll_compass_blueprint_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return pet_message(pet, f'{pet.name} was digging and found a compass blueprint.', focus='📋',
                        mood='😊')
 
 @event_message('space-stroll-sponge')
-async def space_stroll_sponge_message(space: Space) -> str:
+async def space_stroll_sponge_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return pet_message(pet, f'{pet.name} found a sponge at the stream.', focus='🧽', mood='😊')
 
 @event_message('space-update-pan')
-async def space_update_pan_message(space: Space) -> str:
+async def space_update_pan_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return pet_message(pet, f'{pet.name} somehow managed to repair the pan.', focus='🍳', mood='😊')
 
 @event_message('space-update-shower')
-async def space_update_shower_message(space: Space) -> str:
+async def space_update_shower_message(event: Event) -> str:
+    space = await event.get_space()
     pet = await space.get_pet()
     return pet_message(pet, f'{pet.name} patched up the shower with great effort.', focus='🚿',
                        mood='😊')

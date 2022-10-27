@@ -34,10 +34,11 @@ from weakref import WeakSet
 from aiohttp import ClientError, ClientPayloadError, ClientSession, ClientTimeout
 import aioredis.client
 
+import feini.space
 from . import actions, context, updates
 from .actions import EventMessageFunc, MainMode, Mode
 from .furniture import DW, Furniture, TMDB, FURNITURE_TYPES
-from .space import Pet, Space
+from .space import Event, Pet, Space
 from .util import JSONObject, Redis, cancel, raise_for_status, randstr, recovery
 
 class Bot:
@@ -192,6 +193,15 @@ class Bot:
         else:
             self._chat_modes[chat] = mode
 
+    async def events(self) -> AsyncIterator[Event]:
+        """Stream of game events."""
+        while True:
+            _, data = await self.redis.blpop('events')
+            name = data.split('␟', maxsplit=1)[0]
+            cls = cast(object, getattr(feini.space, name))
+            assert isinstance(cls, type) and issubclass(cls, Event) # type: ignore[misc]
+            yield cast(type[Event], cls).parse(data)
+
     async def get_spaces(self) -> set[Space]:
         """Get all spaces."""
         ids = await self.redis.hvals('spaces_by_chat')
@@ -304,15 +314,13 @@ class Bot:
         logger = getLogger(__name__)
         logger.info('Started event queue')
         try:
-            while True:
-                _, event = await self.redis.blpop('events')
-                event_type, space_id = event.split()
+            async for event in self.events():
                 with recovery():
-                    space = await shield(self.get_space(space_id))
+                    space = await shield(event.get_space())
                     pet = await shield(space.get_pet())
-                    reply = await shield(event_messages[event_type](space))
+                    reply = await shield(event_messages[event.type](event))
                     self._send(Message(space.chat, reply))
-                    logger.info('%s (%s): %s', space.chat, pet.name, event_type)
+                    logger.info('%s (%s): %s', space.chat, pet.name, event.type)
         except CancelledError:
             logger.info('Stopped event queue')
             raise

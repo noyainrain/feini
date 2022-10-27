@@ -23,8 +23,20 @@ import random
 
 from . import context
 from .furniture import Content
-from .space import Space
+from .space import Event, Space
 from .util import randstr
+
+async def update_event_format() -> None:
+    updates = 0
+    redis = context.bot.get().redis
+    events = await redis.lrange('events', 0, -1)
+    for i, data in enumerate(events):
+        if '␟' not in data:
+            typ, space_id = data.split()
+            await redis.lset('events', i, str(Event(typ, space_id)))
+            updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Event format (%d)', updates)
 
 async def update_content_url() -> None:
     updates = 0

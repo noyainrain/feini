@@ -31,25 +31,31 @@ class IntroStoryTest(TestCase):
         story = await self.story.get()
         self.assertEqual(story.chapter, 'touch')
         self.assertEqual(story.update_time, 1)
+        self.assertTrue(self.events)
+        self.assertEqual(self.events[-1].type, 'space-explain-touch')
 
         await pet.touch()
         await story.tell()
         story = await story.get()
         self.assertEqual(story.chapter, 'gather')
+        self.assertEqual(self.events[-1].type, 'space-explain-gather')
 
         await self.space.gather()
         await story.tell()
         story = await story.get()
         self.assertEqual(story.chapter, 'feed')
+        self.assertEqual(self.events[-1].type, 'space-explain-feed')
 
         await pet.feed('🥕')
         await story.tell()
         story = await story.get()
         self.assertEqual(story.chapter, 'craft')
+        self.assertEqual(self.events[-1].type, 'space-explain-craft')
 
         await self.space.craft('🪓')
         await story.tell()
         self.assertNotIn(story, await self.space.get_stories())
+        self.assertEqual(self.events[-1].type, 'space-explain-basics')
 
     async def test_tell_unmet_condition(self) -> None:
         await self.story.tell()
@@ -80,6 +86,8 @@ class SewingStoryTest(TestCase):
         self.assertEqual(ghost.avatar, '👻')
         self.assertTrue(dialogue)
         self.assertEqual(dialogue[0].id, 'initial')
+        self.assertTrue(self.events)
+        self.assertEqual(self.events[0].type, 'space-visit-ghost')
 
         await ghost.talk()
         await ghost.talk()

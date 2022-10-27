@@ -14,12 +14,23 @@
 
 # pylint: disable=missing-docstring
 
-from asyncio import Task, all_tasks, current_task
+from asyncio import Task, all_tasks
+from collections.abc import AsyncIterator
 from configparser import ConfigParser
+from contextlib import asynccontextmanager
 from typing import cast
 
 from feini.furniture import TMDB
 from .test_bot import TestCase
+
+@asynccontextmanager
+async def wait_for_background_task() -> AsyncIterator[None]:
+    tasks = cast(set[Task[None]], all_tasks())
+    yield
+    try:
+        await (cast(set[Task[None]], all_tasks()) - tasks).pop()
+    except KeyError:
+        pass
 
 class TMDBTest(TestCase):
     async def test_get_shows(self) -> None:
@@ -30,16 +41,16 @@ class TMDBTest(TestCase):
             self.skipTest('Missing [tmdb] key')
         tmdb = TMDB(key=key)
 
-        # pylint: disable=pointless-statement
-        tmdb.shows
-        await (cast(set[Task[None]], all_tasks()) - {cast(Task[None], current_task())}).pop()
+        async with wait_for_background_task():
+            # pylint: disable=pointless-statement
+            tmdb.shows
         self.assertGreater(len(tmdb.shows), 1)
         self.assertRegex(tmdb.shows[0].url, r'^https://www.themoviedb.org/tv/.+')
 
 class DWTest(TestCase):
     async def test_get_articles(self) -> None:
-        # pylint: disable=pointless-statement
-        self.bot.dw.articles
-        await (cast(set[Task[None]], all_tasks()) - {cast(Task[None], current_task())}).pop()
+        async with wait_for_background_task():
+            # pylint: disable=pointless-statement
+            self.bot.dw.articles
         self.assertGreater(len(self.bot.dw.articles), 1)
         self.assertRegex(self.bot.dw.articles[0].url, '^https://www.dw.com/en/')

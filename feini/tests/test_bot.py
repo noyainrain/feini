@@ -14,12 +14,14 @@
 
 # pylint: disable=missing-docstring
 
+from asyncio import create_task
 from unittest import IsolatedAsyncioTestCase
 
 from feini import context
 from feini.actions import HikeMode
 from feini.bot import Bot
-from feini.space import Hike
+from feini.space import Event, Hike
+from feini.util import cancel
 
 class TestCase(IsolatedAsyncioTestCase):
     """Open Feini test case.
@@ -31,6 +33,10 @@ class TestCase(IsolatedAsyncioTestCase):
     .. attribute:: space
 
        Test space.
+
+    .. attribute:: events
+
+       Events that happened during the test.
     """
 
     async def asyncSetUp(self) -> None:
@@ -39,8 +45,16 @@ class TestCase(IsolatedAsyncioTestCase):
         context.bot.set(self.bot)
         self.space = await self.bot.create_space('local')
 
+        self.events: list[Event] = []
+        self._events_task = create_task(self._record_events())
+
     async def asyncTearDown(self) -> None:
+        await cancel(self._events_task)
         await self.bot.close()
+
+    async def _record_events(self) -> None:
+        async for event in self.bot.events():
+            self.events.append(event)
 
 class BotTest(TestCase):
     async def test_set_mode(self) -> None:

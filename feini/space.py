@@ -533,9 +533,9 @@ class Pet(Entity):
             pipe.hset(self.id, mapping={'nutrition': nutrition, 'dirt': dirt})
             pipe.hincrby(self.id, 'fur', 1)
             if nutrition == 0:
-                pipe.rpush('events', f'pet-hungry {self.space_id}')
+                pipe.rpush('events', str(Event('pet-hungry', self.space_id)))
             if dirt == self.DIRT_MAX:
-                pipe.rpush('events', f'pet-dirty {self.space_id}')
+                pipe.rpush('events', str(Event('pet-dirty', self.space_id)))
             await pipe.execute()
 
         space = await self.get_space()
@@ -666,6 +666,38 @@ class Pet(Entity):
 
     def __str__(self) -> str:
         return f"🐕{self.clothing or ''}"
+
+@dataclass
+class Event:
+    """Game event.
+
+    .. attribute:: type
+
+       Type of the event.
+
+    .. attribute:: space_id
+
+       ID of the :class:`Space` where the event happened.
+    """
+
+    type: str
+    space_id: str
+
+    @staticmethod
+    def parse(data: str) -> Event:
+        """Parse the string representation *data* into an event."""
+        try:
+            _, typ, space_id = data.split('␟')
+        except ValueError:
+            raise ValueError('Bad data format') from None
+        return Event(typ, space_id)
+
+    async def get_space(self) -> Space:
+        """Get the space where the event happened."""
+        return await context.bot.get().get_space(self.space_id)
+
+    def __str__(self) -> str:
+        return '␟'.join([type(self).__name__, self.type, self.space_id])
 
 @dataclass
 class Message:
