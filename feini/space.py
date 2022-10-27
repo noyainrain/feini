@@ -40,7 +40,7 @@ from typing import TypeVar
 from collections.abc import Callable, Awaitable
 from inspect import iscoroutinefunction
 
-_F = TypeVar('_F', bound=Callable[..., object])
+_F = TypeVar('_F', bound=Callable[..., object]) # type: ignore[misc]
 
 if TYPE_CHECKING:
     from .stories import Story
@@ -470,13 +470,13 @@ class Pet(Entity):
 
        Current dirtiness level.
 
-    .. attribute:: fur
-
-       Current fur growth level.
-
     .. attribute:: reciprocity
 
        Current reciprocity level of the relationship to the player.
+
+    .. attribute:: fur
+
+       Current fur growth level.
 
     .. attribute:: clothing
 
@@ -494,13 +494,13 @@ class Pet(Entity):
 
        Level at which the pet is completely dirty.
 
-    .. attribute:: FUR_MAX
-
-       Level at which the fur is fully grown.
-
     .. attribute:: RECIPROCITY_MAX
 
        Level at which the relationship with the player feels completely reciprocal.
+
+    .. attribute:: FUR_MAX
+
+       Level at which the fur is fully grown.
 
     .. attribute:: ACTIVITIES
 
@@ -509,9 +509,9 @@ class Pet(Entity):
 
     NUTRITION_MAX = 24 + 1
     DIRT_MAX = 48 + 1
-    FUR_MAX = 8 - 1
     # RECIPROCITY_MAX = 72
     RECIPROCITY_MAX = 10
+    FUR_MAX = 8 - 1
     ACTIVITIES = {'💤', '🍃'}
 
     def __init__(self, data: dict[str, str]) -> None:
@@ -528,8 +528,8 @@ class Pet(Entity):
         # |
         # -x waiting for player to respond => go up to full / 72 again
 
-        self.fur = int(data['fur'])
         self.reciprocity = int(data['reciprocity'])
+        self.fur = int(data['fur'])
         self.clothing = data['clothing'] or None
         self.activity_id = data['activity_id']
 
@@ -541,21 +541,20 @@ class Pet(Entity):
         """
         async def wrapper(*args: object, **kwargs: object) -> object:
             assert iscoroutinefunction(f) # type: ignore[misc]
-            # any exception is just passed through - no need to refill the reciprocity level
             result = await cast(Awaitable[object], f(*args, **kwargs))
 
-            print('PRE RECIPROCITY REFILL')
-            # TODO some note about race conditions
+            # Note that if there is a crash balancing the reciprocity, it will be balanced on the
+            # next social interaction
             self = args[0]
             assert isinstance(self, Pet)
             async with context.bot.get().redis.pipeline() as pipe:
                 await pipe.watch(self.id)
                 reciprocity = int(await pipe.hget(self.id, 'reciprocity') or '')
                 pipe.multi()
-                # Pet just contacted the player
+                # Pet has initiated a social interaction and is waiting for a response
                 if reciprocity <= 0:
-                    pipe.hset(self.id, 'reciprocity', self.RECIPROCITY_MAX + randint(-2, 2))
-                    print('RESET RECIPROCITY TO 24')
+                    pipe.hset(self.id, 'reciprocity', self.RECIPROCITY_MAX + randint(-1, 1))
+                    print('RESET RECIPROCITY TO', self.RECIPROCITY_MAX)
                 await pipe.execute()
 
             return result
@@ -575,6 +574,7 @@ class Pet(Entity):
     async def tick(self) -> None:
         """Simulate the pet for one tick."""
         bot = context.bot.get()
+
         async with bot.redis.pipeline() as pipe:
             await pipe.watch(self.id)
             values = await pipe.hmget(self.id, 'nutrition', 'dirt', 'reciprocity')
@@ -583,38 +583,42 @@ class Pet(Entity):
             nutrition = int(values[0] or '')
             dirt = int(values[1] or '')
             reciprocity = int(values[2] or '')
+            furniture_ids = await pipe.lrange(f'{self.id}.items', 0, -1)
 
             pipe.multi()
             nutrition -= 1
             dirt += 1
             reciprocity -= 1
-            print('TICK', reciprocity)
             pipe.hset(self.id,
                       mapping={'nutrition': nutrition, 'dirt': dirt, 'reciprocity': reciprocity})
             pipe.hincrby(self.id, 'fur', 1)
+
+            activities = ['', *self.ACTIVITIES, *furniture_ids]
+            activity_id = random.choice(activities)
+            if reciprocity == 0:
+                activity_id = ''
+            pipe.hset(self.id, 'activity_id', activity_id)
+
             if nutrition == 0:
                 pipe.rpush('events', str(Event('pet-hungry', self.space_id)))
             if dirt == self.DIRT_MAX:
                 pipe.rpush('events', str(Event('pet-dirty', self.space_id)))
+            if reciprocity == 0:
+                activities = ['', *furniture_ids]
+                activity = random.choice(activities)
+                pipe.rpush('events', str(NudgeEvent('space-nudge', self.space_id, activity)))
             await pipe.execute()
 
-        space = await self.get_space()
-        furniture = await space.get_furniture()
-        if reciprocity == 0:
-            await self._set_activity('')
-            activities: list[Furniture | str] = ['', *furniture]
-            activity = random.choice(activities)
-            if isinstance(activity, Furniture):
-                activity = activity.id
-            print('EVENT (', activity, ')')
-            # OQ should we create a method called nudge()?
-            # await bot.redis.rpush('events', f'space-nudge-{activity} {self.space_id}')
-            await bot.redis.rpush('events',
-                                  str(NudgeEvent('space-nudge', self.space_id, activity)))
-        else:
-            activities = ['', *self.ACTIVITIES, *furniture]
-            # await self.engage(random.choice(activities))
-            await self._set_activity(random.choice(activities))
+        # XXX no unit tests caught that we did not call .use()
+        activity = await self.get_activity()
+        if isinstance(activity, Furniture):
+            await activity.use()
+
+        # get_space()
+        # get_furniture()
+        # set_activity()
+        #   activity.use()
+        # emit event
 
     @social # type: ignore[misc]
     async def touch(self) -> None:
@@ -728,9 +732,6 @@ class Pet(Entity):
     @social # type: ignore[misc]
     async def engage(self, activity: Furniture | str) -> None:
         """Engage the pet in the given *activity*."""
-        await self._set_activity(activity)
-
-    async def _set_activity(self, activity: Furniture | str) -> None:
         async with context.bot.get().redis.pipeline() as pipe:
             if isinstance(activity, Furniture):
                 await pipe.watch(activity.id)
@@ -748,25 +749,8 @@ class Pet(Entity):
         if isinstance(activity, Furniture):
             await activity.use()
 
-    async def _reset_reciprocity(self) -> None:
-        async with context.bot.get().redis.pipeline() as pipe:
-            await pipe.watch(self.id)
-            reciprocity = int(await pipe.hget(self.id, 'reciprocity') or '')
-            pipe.multi()
-            if reciprocity < 0:
-                # TODO 24 / 72 should be a constant
-                pipe.hset(self.id, 'reciprocity', 24)
-                print('RESET RECIPROCITY TO 24')
-            await pipe.execute()
-
-        # await context.bot.get().redis.hset(self.id, 'reciprocity', 24)
-
     def __str__(self) -> str:
         return f"🐕{self.clothing or ''}"
-
-#reveal_type(Pet.social)
-#reveal_type(Pet.feed)
-#reveal_type(Pet.wash)
 
 @dataclass
 class Event:

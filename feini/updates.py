@@ -33,12 +33,7 @@ async def update_pet_reciprocity() -> None:
         pet_id = await redis.hget(space_id, 'pet_id')
         assert pet_id
         if not await redis.hexists(pet_id, 'reciprocity'):
-            hatched = bool(await redis.hget(pet_id, 'hatched'))
-            # OQ should we set to maximum value if the pet is hatched?
-            #   PRO notification about new feature (= without player interaction)
-            #   CON additional check
-            # OQ should we directly emit the nudge event?
-            await redis.hset(pet_id, 'reciprocity', '1' if hatched else '0')
+            await redis.hset(pet_id, 'reciprocity', '1')
             updates += 1
     if updates:
         getLogger(__name__).info('Updated Pet.reciprocity (%d)', updates)

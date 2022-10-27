@@ -14,6 +14,10 @@
 
 """Available furniture.
 
+.. data:: FURNITURE_PROPERTIES
+
+   Properties of each furniture piece.
+
 .. data:: FURNITURE_MATERIAL
 
    Material needed for each furniture item.
@@ -21,10 +25,6 @@
 .. data:: FURNITURE_TYPES
 
    Furniture classes.
-
-.. data:: FURNITURE_PROPERTIES
-
-   Properties of each furniture piece.
 """
 
 from __future__ import annotations
@@ -50,6 +50,32 @@ from feedparser import ThingsNobodyCaresAboutButMe
 from . import context
 from .core import Entity
 from .util import JSONObject, cancel, collapse, raise_for_status
+
+class FurnitureProperties(TypedDict):
+    """Properties of a furniture piece.
+
+    .. attribute:: portable
+
+       Indicates if the furniture piece is portable or fixed.
+    """
+
+    portable: bool
+
+FURNITURE_PROPERTIES: dict[str, FurnitureProperties] = {
+    # Toys
+    '🪃': {'portable': True},
+    '⚾': {'portable': True},
+    '🧸': {'portable': True},
+    # Furniture
+    '🛋️': {'portable': False},
+    '🪴': {'portable': False},
+    '⛲': {'portable': False},
+    # Devices
+    '📺': {'portable': False},
+    # Miscellaneous
+    '🗞️': {'portable': True},
+    '🎨': {'portable': False}
+}
 
 FURNITURE_MATERIAL = {
     # Toys
@@ -81,7 +107,7 @@ class Furniture(Entity):
 
     @property
     def portable(self) -> bool:
-        """TODO."""
+        """Indicates if the furniture piece is portable or fixed."""
         return FURNITURE_PROPERTIES[self.type]['portable']
 
     @staticmethod
@@ -370,45 +396,18 @@ class DW:
         if self._fetch_task:
             await cancel(self._fetch_task)
 
-# OQ: should there be different messages depending if the furniture action is engage or view
 FURNITURE_TYPES = {
     # Toys
-    '🪃': Furniture,  # carry
-    '⚾': Furniture,  # carry
-    '🧸': Furniture,  # carry
+    '🪃': Furniture,
+    '⚾': Furniture,
+    '🧸': Furniture,
     # Furniture
-    '🛋️': Furniture,  # call
-    '🪴': Houseplant, # call
-    '⛲': Furniture,  # call
+    '🛋️': Furniture,
+    '🪴': Houseplant,
+    '⛲': Furniture,
     # Devices
-    '📺': Television, # call
+    '📺': Television,
     # Miscellaneous
-    '🗞️': Newspaper,  # carry
-    '🎨': Palette     # call
-}
-
-class FurnitureProperties(TypedDict):
-    """Properties of a furniture piece.
-
-    .. attribute:: portable
-
-       Indicates if the furniture piece is portable or fixed.
-    """
-
-    portable: bool
-
-FURNITURE_PROPERTIES: dict[str, FurnitureProperties] = {
-    # Toys
-    '🪃': {'portable': True},
-    '⚾': {'portable': True},
-    '🧸': {'portable': True},
-    # Furniture
-    '🛋️': {'portable': False},
-    '🪴': {'portable': False},
-    '⛲': {'portable': False},
-    # Devices
-    '📺': {'portable': False},
-    # Miscellaneous
-    '🗞️': {'portable': True},
-    '🎨': {'portable': False}
+    '🗞️': Newspaper,
+    '🎨': Palette
 }

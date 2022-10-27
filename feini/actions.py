@@ -816,19 +816,12 @@ class HikeMode(Mode):
             🔙: Return home.
         """)
 
-# TODO events by furniture category!
-# @event_message('space-nudge-portable')
-# @event_message('space-nudge-fixed')
-# ...
-
 from .space import NudgeEvent
 
 @event_message('space-nudge')
 async def space_nudge_message(event: Event) -> str:
     assert isinstance(event, NudgeEvent)
     activity = await event.get_activity()
-    print('ACTIVITY', activity)
-    print('TYPE ACTIVITY', type(activity))
     space = await event.get_space()
     pet = await space.get_pet()
     if isinstance(activity, str):
@@ -861,8 +854,6 @@ async def space_nudge_message(event: Event) -> str:
 #async def pet_space_nudge_tv_message(space: Space) -> str:
 #    pet = await space.get_pet()
 #    return pet_message(pet, f'{pet.name} calls you over to the television 📺. {speak()}', mood='😊')
-
-# TODO: messages for other furniture items
 
 @event_message('pet-hungry')
 async def pet_hungry_message(event: Event) -> str:
