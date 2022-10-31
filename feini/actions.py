@@ -245,6 +245,8 @@ class MainMode(Mode):
         'ghost-sewing-blueprint': [
             '(You give {items} to Ghost) Thank you so much, dear! Please, let me return the favor '
             'and tell you a few things about sewing! (You get a sewing needle blueprint 📋)'
+            # OQ should we parametrize lesson also?
+            # 'and tell you a few things about sewing! (You get a 📋{lesson} blueprint)'
         ],
         'ghost-sewing-goodbye': [
             'Do you think she will forgive me? (Ghost slowly vanishes into thin air)'

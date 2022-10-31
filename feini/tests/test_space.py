@@ -257,6 +257,7 @@ class CharacterTest(TestCase):
         self.assertEqual(message.id, 'ghost-sewing-blueprint')
         self.assertEqual(message.taken, ['🧶', '🧶', '🧶']) # type: ignore[misc]
         self.assertEqual(space.items, ['🥕']) # type: ignore[misc]
+        self.assertIn('🪡', await self.space.get_blueprints())
 
         await character.talk()
         message = await character.talk()

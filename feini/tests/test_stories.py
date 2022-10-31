@@ -82,7 +82,7 @@ class SewingStoryTest(TestCase):
         self.assertEqual(len(characters), 1)
         ghost = characters[0]
         dialogue = await ghost.get_dialogue()
-        self.assertEqual(story.chapter, 'quest')
+        self.assertEqual(story.chapter, 'leave')
         self.assertEqual(ghost.avatar, '👻')
         self.assertTrue(dialogue)
         self.assertEqual(dialogue[0].id, 'initial')
@@ -94,12 +94,8 @@ class SewingStoryTest(TestCase):
         await ghost.talk()
         await self.space.obtain('🧶', '🧶', '🧶')
         await ghost.talk()
-        await story.tell()
-        story = await story.get()
-        self.assertEqual(story.chapter, 'leave')
-        self.assertIn('🪡', await self.space.get_blueprints())
-
         await ghost.talk()
         await story.tell()
         self.assertNotIn(story, await self.space.get_stories())
         self.assertFalse(await self.space.get_characters())
+        self.assertIn('🪡', await self.space.get_blueprints())

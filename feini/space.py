@@ -711,6 +711,10 @@ class Message:
 
        Items the character currently wants, if any.
 
+    .. attribute:: lesson
+
+       Blueprint the character teaches to the player.
+
     .. attribute:: taken
 
        Items the player has just given to the character, if any.
@@ -718,6 +722,7 @@ class Message:
 
     id: str
     request: list[str] = field(default_factory=list)
+    lesson: str | None = None # XXX instruction maybe
     taken: list[str] = field(default_factory=list, compare=False)
 
     def __post_init__(self) -> None:
@@ -725,6 +730,9 @@ class Message:
             if not any(item in items
                        for category, items in Space.ITEM_CATEGORIES.items() if category != 'tools'):
                 raise ValueError(f'Unknown request item {item}')
+        if not (self.lesson is None or self.lesson in FURNITURE_MATERIAL or
+                self.lesson in Space.TOOL_MATERIAL):
+            raise ValueError(f'Unknown lesson {self.lesson}')
         for item in self.taken:
             if not any(item in items
                        for category, items in Space.ITEM_CATEGORIES.items() if category != 'tools'):
@@ -733,12 +741,16 @@ class Message:
     @staticmethod
     def parse(data: str) -> Message:
         """Parse the string representation *data* into a message."""
-        tokens = data.split()
-        return Message(tokens[0], tokens[1:])
+        # ghost-hello 🥕 🥕 🥕 => ghost-hello␟🥕 🥕 🥕␟🎃
+        try:
+            message_id, request, lesson = data.split('␟')
+        except ValueError:
+            raise ValueError('Bad data format') from None
+        return Message(message_id, request.split(), lesson or None)
 
     def encode(self) -> str:
         """Return a string representation of the message."""
-        return ' '.join([self.id, *self.request])
+        return '␟'.join([self.id, ' '.join(self.request), self.lesson or ''])
 
 class Character:
     """Non-Player character.
@@ -793,6 +805,9 @@ class Character:
                     return message
             pipe.ltrim(dialogue_key, 1, -1)
             pipe.hset(self.space_id, 'resources', ' '.join(items))
+            if next_message.lesson:
+                pipe.zadd(f'{self.space_id}.blueprints',
+                          {next_message.lesson: Space.BLUEPRINT_WEIGHTS[next_message.lesson]})
             await pipe.execute()
             return next_message
 

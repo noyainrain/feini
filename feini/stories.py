@@ -118,17 +118,18 @@ class SewingStory(Story):
                     Message('ghost-sewing-hello'),
                     Message('ghost-sewing-daughter'),
                     Message('ghost-sewing-request', request=['🧶', '🧶', '🧶']),
-                    Message('ghost-sewing-blueprint'),
+                    Message('ghost-sewing-blueprint', lesson='🪡'),
                     Message('ghost-sewing-goodbye')
                 ]
                 pipe.rpush(f'{character_id}.dialogue', *(message.encode() for message in dialogue))
                 pipe.rpush(f'{self.space_id}.characters', character_id)
-                pipe.hset(self.id, mapping={'chapter': 'quest', 'update_time': bot.time})
-                pipe.rpush('events', str(Event('space-visit-ghost', self.space_id)))
-            elif (chapter == 'quest' and
-                  message.id in {'ghost-sewing-blueprint', 'ghost-sewing-goodbye'}):
-                pipe.zadd(f'{self.space_id}.blueprints', {'🪡': Space.BLUEPRINT_WEIGHTS['🪡']})
                 pipe.hset(self.id, mapping={'chapter': 'leave', 'update_time': bot.time})
+                # pipe.hset(self.id, mapping={'chapter': 'quest', 'update_time': bot.time})
+                pipe.rpush('events', str(Event('space-visit-ghost', self.space_id)))
+            #elif (chapter == 'quest' and
+            #      message.id in {'ghost-sewing-blueprint', 'ghost-sewing-goodbye'}):
+            #    pipe.zadd(f'{self.space_id}.blueprints', {'🪡': Space.BLUEPRINT_WEIGHTS['🪡']})
+            #    pipe.hset(self.id, mapping={'chapter': 'leave', 'update_time': bot.time})
             elif chapter == 'leave' and message.id == 'ghost-sewing-goodbye':
                 assert character_id
                 pipe.delete(character_id, f'{character_id}.dialogue')
