@@ -78,6 +78,7 @@ class Bot:
     """
 
     TICK = 60 * 60
+    # XXX
     TICK = 1
 
     def __init__(self, *, redis_url: str = 'redis:', telegram_key: str | None = None,

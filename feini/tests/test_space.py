@@ -124,20 +124,23 @@ class PetTest(TestCase):
         pet = await self.pet.get()
         self.assertEqual(pet.nutrition, (8 - 1) - 1)
         self.assertEqual(pet.dirt, Pet.DIRT_MAX - (8 - 1) + 1)
-        self.assertEqual(pet.fur, 1)
         self.assertEqual(pet.reciprocity, -1)
+        self.assertEqual(pet.fur, 1)
 
     async def test_tick_later_time(self) -> None:
         await self.pet.touch()
         await self.space.obtain(*FURNITURE_MATERIAL['🪴'])
-        await self.space.craft('🪴')
+        plant = await self.space.craft('🪴')
+
         for _ in range(Pet.RECIPROCITY_MAX + 1):
             await self.pet.tick()
         self.assertEqual(len(self.events), 3)
         self.assertEqual(self.events[0].type, 'pet-hungry')
         self.assertEqual(self.events[1].type, 'pet-dirty')
-        self.assertIsInstance(self.events[2], NudgeEvent)
+        assert isinstance(self.events[2], NudgeEvent)
         self.assertEqual(self.events[2].type, 'space-nudge')
+        activity = await self.events[2].get_activity()
+        self.assertIn(activity, {'', plant}) # type: ignore[misc]
 
         for _ in range(self.TRIALS):
             pet = await self.pet.get()

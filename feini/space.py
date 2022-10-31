@@ -22,28 +22,25 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Collection
+from collections.abc import Awaitable, Callable, Collection
 import dataclasses
 from dataclasses import dataclass, field
+from inspect import iscoroutinefunction
 from itertools import chain
 import random
 from random import randint, shuffle
 import sys
-from typing import cast, TYPE_CHECKING
+from typing import TypeVar, cast, TYPE_CHECKING
 
 from . import context
 from .core import Entity
 from .furniture import Furniture, FURNITURE_TYPES, FURNITURE_MATERIAL
 from .util import randstr
 
-from typing import TypeVar
-from collections.abc import Callable, Awaitable
-from inspect import iscoroutinefunction
-
-_F = TypeVar('_F', bound=Callable[..., object]) # type: ignore[misc]
-
 if TYPE_CHECKING:
     from .stories import Story
+
+_F = TypeVar('_F', bound=Callable[..., object]) # type: ignore[misc]
 
 CHARACTER_NAMES = {
     '👻': 'Ghost'
@@ -509,8 +506,8 @@ class Pet(Entity):
 
     NUTRITION_MAX = 24 + 1
     DIRT_MAX = 48 + 1
-    # RECIPROCITY_MAX = 72
-    RECIPROCITY_MAX = 10
+    # XXX
+    RECIPROCITY_MAX = 10 # 72
     FUR_MAX = 8 - 1
     ACTIVITIES = {'💤', '🍃'}
 
@@ -521,30 +518,23 @@ class Pet(Entity):
         self.hatched = bool(data['hatched'])
         self.nutrition = int(data['nutrition'])
         self.dirt = int(data['dirt'])
-
-        # 72 full feeling of reciprocity -> be content :)
-        # |
-        # 0  no feeling of reciprocity   -> need to contact the player => nudge()
-        # |
-        # -x waiting for player to respond => go up to full / 72 again
-
         self.reciprocity = int(data['reciprocity'])
         self.fur = int(data['fur'])
         self.clothing = data['clothing'] or None
         self.activity_id = data['activity_id']
 
     @staticmethod
-    def social(f: _F) -> _F: # type: ignore[misc]
+    def social(func: _F) -> _F: # type: ignore[misc]
         """Decorator to make a social interaction between the player and the pet.
 
         Social interactions influence the :attr:`reciprocity`.
         """
         async def wrapper(*args: object, **kwargs: object) -> object:
-            assert iscoroutinefunction(f) # type: ignore[misc]
-            result = await cast(Awaitable[object], f(*args, **kwargs))
+            assert iscoroutinefunction(func) # type: ignore[misc]
+            result = await cast(Awaitable[object], func(*args, **kwargs))
 
-            # Note that if there is a crash balancing the reciprocity, it will be balanced on the
-            # next social interaction
+            # Note that if there is a crash balancing the reciprocity level, it will be balanced on
+            # the next social interaction
             self = args[0]
             assert isinstance(self, Pet)
             async with context.bot.get().redis.pipeline() as pipe:
@@ -554,7 +544,6 @@ class Pet(Entity):
                 # Pet has initiated a social interaction and is waiting for a response
                 if reciprocity <= 0:
                     pipe.hset(self.id, 'reciprocity', self.RECIPROCITY_MAX + randint(-1, 1))
-                    print('RESET RECIPROCITY TO', self.RECIPROCITY_MAX)
                 await pipe.execute()
 
             return result
@@ -574,16 +563,16 @@ class Pet(Entity):
     async def tick(self) -> None:
         """Simulate the pet for one tick."""
         bot = context.bot.get()
-
         async with bot.redis.pipeline() as pipe:
-            await pipe.watch(self.id)
+            furniture_key = f'{self.space_id}.items'
+            await pipe.watch(self.id, furniture_key)
             values = await pipe.hmget(self.id, 'nutrition', 'dirt', 'reciprocity')
             if not values:
                 raise ReferenceError(self.id)
             nutrition = int(values[0] or '')
             dirt = int(values[1] or '')
             reciprocity = int(values[2] or '')
-            furniture_ids = await pipe.lrange(f'{self.id}.items', 0, -1)
+            furniture_ids = await pipe.lrange(furniture_key, 0, -1)
 
             pipe.multi()
             nutrition -= 1
@@ -593,8 +582,7 @@ class Pet(Entity):
                       mapping={'nutrition': nutrition, 'dirt': dirt, 'reciprocity': reciprocity})
             pipe.hincrby(self.id, 'fur', 1)
 
-            activities = ['', *self.ACTIVITIES, *furniture_ids]
-            activity_id = random.choice(activities)
+            activity_id = random.choice(['', *self.ACTIVITIES, *furniture_ids])
             if reciprocity == 0:
                 activity_id = ''
             pipe.hset(self.id, 'activity_id', activity_id)
@@ -604,21 +592,13 @@ class Pet(Entity):
             if dirt == self.DIRT_MAX:
                 pipe.rpush('events', str(Event('pet-dirty', self.space_id)))
             if reciprocity == 0:
-                activities = ['', *furniture_ids]
-                activity = random.choice(activities)
-                pipe.rpush('events', str(NudgeEvent('space-nudge', self.space_id, activity)))
+                activity_id = random.choice(['', *furniture_ids])
+                pipe.rpush('events', str(NudgeEvent('space-nudge', self.space_id, activity_id)))
             await pipe.execute()
 
-        # XXX no unit tests caught that we did not call .use()
         activity = await self.get_activity()
         if isinstance(activity, Furniture):
             await activity.use()
-
-        # get_space()
-        # get_furniture()
-        # set_activity()
-        #   activity.use()
-        # emit event
 
     @social # type: ignore[misc]
     async def touch(self) -> None:
@@ -718,8 +698,7 @@ class Pet(Entity):
                 pipe.hset(self.id, 'fur', 0)
                 pipe.hset(self.space_id, 'resources', ' '.join(items))
             await pipe.execute()
-
-        return wool
+            return wool
 
     @social # type: ignore[misc]
     async def change_name(self, name: str) -> None:
@@ -783,23 +762,6 @@ class Event:
 
     def __str__(self) -> str:
         return '␟'.join([type(self).__name__, self.type, self.space_id])
-
-    #@classmethod
-    #def xparse(cls, data: str) -> Event:
-    #    tokens = data.split('␟')
-    #    return cls(*cls.decode(tokens))
-
-    #def xstr(self) -> str:
-    #    return '␟'.join(self.encode())
-
-    #@staticmethod
-    #def decode(data: list[str]) -> tuple[str, str]:
-    #    if len(data) != 2:
-    #        raise ValueError('...')
-    #    return data[1], data[2]
-
-    #def encode(self) -> list[str]:
-    #    return [type(self).__name__, self.type, self.space_id]
 
 @dataclass
 class NudgeEvent(Event):

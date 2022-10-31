@@ -105,17 +105,17 @@ class Furniture(Entity):
         super().__init__(data)
         self.type = data['type']
 
-    @property
-    def portable(self) -> bool:
-        """Indicates if the furniture piece is portable or fixed."""
-        return FURNITURE_PROPERTIES[self.type]['portable']
-
     @staticmethod
     async def create(furniture_id: str, furniture_type: str) -> Furniture:
         """Create a furniture item of the given *furniture_type* with *furniture_id*."""
         data = {'id': furniture_id, 'type': furniture_type}
         await context.bot.get().redis.hset(furniture_id, mapping=data)
         return Furniture(data)
+
+    @property
+    def portable(self) -> bool:
+        """Indicates if the furniture piece is portable or fixed."""
+        return FURNITURE_PROPERTIES[self.type]['portable']
 
     async def tick(self, time: int) -> None:
         """Simulate the furniture piece at *time* for one tick."""

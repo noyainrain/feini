@@ -23,7 +23,7 @@ from typing import cast
 from feini.furniture import TMDB
 from .test_bot import TestCase
 
-@contextmanager
+@asynccontextmanager
 async def wait_for_background_task() -> AsyncIterator[None]:
     tasks = cast(set[Task[None]], all_tasks())
     yield
