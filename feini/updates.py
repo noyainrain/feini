@@ -37,7 +37,7 @@ async def update_space_patterns() -> None:
     for space_id in await redis.hvals('spaces_by_chat'):
         key = f'{space_id}.patterns'
         if not await redis.exists(key):
-            redis.zadd(key, patterns)
+            await redis.zadd(key, patterns)
             updates += 1
     if updates:
         getLogger(__name__).info('Updated Space.patterns (%d)', updates)
