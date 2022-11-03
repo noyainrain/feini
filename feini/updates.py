@@ -26,6 +26,22 @@ from .furniture import Content
 from .space import Event, Space
 from .util import randstr
 
+async def update_space_patterns() -> None:
+    updates = 0
+    patterns = {
+        pattern:
+            Space.PATTERN_WEIGHTS[pattern]
+            for pattern in ['🧢', '👒', '🎧', '👓', '🕶️', '🥽', '🧣', '🎀', '💍']
+    }
+    redis = context.bot.get().redis
+    for space_id in await redis.hvals('spaces_by_chat'):
+        key = f'{space_id}.patterns'
+        if not await redis.exists(key):
+            redis.zadd(key, patterns)
+            updates += 1
+    if updates:
+        getLogger(__name__).info('Updated Space.patterns (%d)', updates)
+
 async def update_event_format() -> None:
     updates = 0
     redis = context.bot.get().redis

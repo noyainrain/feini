@@ -109,6 +109,10 @@ class Space(Entity):
     .. attribute:: BLUEPRINT_WEIGHTS
 
        Weights by which blueprints are ordered.
+
+	.. attribute:: PATTERN_WEIGHTS
+
+       Weights by which sewing patterns are ordered.
     """
 
     MEADOW_VEGETABLE_GROWTH_MAX = 8 - 1
@@ -160,6 +164,8 @@ class Space(Entity):
         for weight, blueprint in enumerate(chain(TOOL_MATERIAL, FURNITURE_MATERIAL))
     }
 
+    PATTERN_WEIGHTS = {pattern: weight for weight, pattern in enumerate(CLOTHING_MATERIAL)}
+
     def __init__(self, data: dict[str, str]) -> None:
         super().__init__(data)
         self.chat = data['chat']
@@ -178,6 +184,10 @@ class Space(Entity):
     async def get_blueprints(self) -> list[str]:
         """Get known blueprints."""
         return await context.bot.get().redis.zrange(f'{self.id}.blueprints', 0, -1)
+
+    async def get_patterns(self) -> list[str]:
+        """Get known sewing patterns."""
+        return await context.bot.get().redis.zrange(f'{self.id}.patterns', 0, -1)
 
     async def get_furniture(self) -> list[Furniture]:
         """Get owned furniture."""
@@ -351,21 +361,19 @@ class Space(Entity):
 
     async def sew(self, pattern: str) -> str:
         """Sew a new clothing item given by *pattern*."""
-        try:
-            material = self.CLOTHING_MATERIAL[pattern]
-        except KeyError:
-            raise ValueError(f'Unknown pattern {pattern}') from None
-
         async with context.bot.get().redis.pipeline() as pipe:
             await pipe.watch(self.id)
             values = await pipe.hmget(self.id, 'resources', 'tools')
             items = (values[0] or '').split()
             tools = (values[1] or '').split()
-            pipe.multi()
             if '🪡' not in tools:
                 raise ValueError('No tools item 🪡')
+            if await pipe.zscore(f'{self.id}.patterns', pattern) is None:
+                raise ValueError(f'Unknown pattern {pattern}')
+
+            pipe.multi()
             try:
-                for item in material:
+                for item in self.CLOTHING_MATERIAL[pattern]:
                     items.remove(item)
             except ValueError:
                 raise ValueError('Missing items') from None

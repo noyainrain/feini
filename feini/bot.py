@@ -284,6 +284,10 @@ class Bot:
             pipe.zadd(f'{space_id}.blueprints',
                       {blueprint: Space.BLUEPRINT_WEIGHTS[blueprint] for blueprint in blueprints})
 
+            patterns = ['🧢', '👒', '🎧', '👓', '🕶️', '🥽', '🧣', '🎀', '💍']
+            pipe.zadd(f'{space_id}.patterns',
+                      {pattern: Space.PATTERN_WEIGHTS[pattern] for pattern in patterns})
+
             stories = [
                 {
                     'id': f'IntroStory:{randstr()}',

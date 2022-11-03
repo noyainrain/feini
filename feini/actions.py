@@ -348,29 +348,30 @@ class MainMode(Mode):
     async def sew(self, space: Space, *args: str) -> str:
         try:
             pattern = normalize_emoji(args[1])
-        except IndexError:
-            pattern = ''
-
-        try:
             material = ''.join(space.CLOTHING_MATERIAL[pattern])
-        except KeyError:
-            clothes = '\n                '.join(
-                f"{pattern}: {''.join(material)}"
-                for pattern, material in Space.CLOTHING_MATERIAL.items())
-            return dedent(f"""\
-                🪡 ⬜Item
-                Sew a new clothing item.
-
-                Clothes:
-                {clothes}
-            """)
+        except (IndexError, KeyError):
+            pattern = ''
 
         try:
             await space.sew(pattern)
             return f'🪡 You spend {material} to sew a new {pattern}. 🥳'
         except ValueError as e:
+            if 'pattern' in str(e):
+                patterns = await space.get_patterns()
+                clothes = '\n                    '.join(
+                    f"{pattern}: {''.join(Space.CLOTHING_MATERIAL[pattern])}"
+                    for pattern in patterns)
+                return dedent(f"""\
+                    🪡 ⬜Item
+                    Sew a new clothing item.
+
+                    Clothes:
+                    {clothes}
+                """)
+
             if 'items' in str(e):
                 return f'You need {material} to sew a {pattern}.'
+
             raise
 
     @item_action('🍳')

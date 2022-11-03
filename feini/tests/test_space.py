@@ -96,6 +96,11 @@ class SpaceTest(TestCase):
         self.assertEqual(ribbon, '🎀')
         self.assertEqual(space.items, ['🥕', '🎀']) # type: ignore[misc]
 
+    async def test_sew_unknown_pattern(self) -> None:
+        await self.space.obtain('🪡')
+        with self.assertRaisesRegex(ValueError, 'pattern'):
+            await self.space.sew('🎩')
+
     async def test_sew_no_material(self) -> None:
         await self.space.obtain('🪡')
         with self.assertRaisesRegex(ValueError, 'items'):
