@@ -26,10 +26,11 @@ from collections.abc import Collection
 import dataclasses
 from dataclasses import dataclass, field
 from itertools import chain
+from inspect import getmembers
 import random
 from random import randint, shuffle
 import sys
-from typing import cast, TYPE_CHECKING
+from typing import cast, overload, TYPE_CHECKING
 
 from . import context
 from .core import Entity
@@ -109,6 +110,10 @@ class Space(Entity):
     .. attribute:: BLUEPRINT_WEIGHTS
 
        Weights by which blueprints are ordered.
+
+    .. attribute:: schedule
+
+       Simulation schedule.
     """
 
     MEADOW_VEGETABLE_GROWTH_MAX = 8 - 1
@@ -170,6 +175,7 @@ class Space(Entity):
         self.woods_growth = int(data['woods_growth'])
         self.trail_supply = int(data['trail_supply'])
         self.pet_id = data['pet_id']
+        self.schedule = Schedule(self)
 
     async def get_pet(self) -> Pet:
         """Get the residing pet."""
@@ -216,6 +222,8 @@ class Space(Entity):
         await pet.tick()
         for item in await self.get_furniture():
             await item.tick(time)
+
+        await self.schedule.run()
 
         async with context.bot.get().redis.pipeline() as pipe:
             await pipe.watch(self.id)
@@ -436,6 +444,99 @@ class Space(Entity):
                 await story.tell()
             except ReferenceError:
                 pass
+
+from collections.abc import Awaitable, Callable
+from functools import partial
+
+class DateMethod:
+    """Simulate an annual date.
+
+    .. attribute:: func
+
+       Annotated function.
+
+    .. attribute:: month
+
+       Month of the date.
+
+    .. attribute:: day
+
+       Day of the date.
+    """
+
+    def __init__(self, func: Callable[[Schedule], Awaitable[None]], month: int,
+                 day: int) -> None:
+        self.func = func
+        self.month = month
+        self.day = day
+
+    @overload
+    def __get__(self, instance: Schedule,
+                owner: type[Schedule] | None = None) -> Callable[[], Awaitable[None]]:
+        pass
+    @overload
+    def __get__(self, instance: None, owner: type[Schedule] | None = None) -> DateMethod:
+        pass
+    def __get__(self, instance: Schedule | None,
+                owner: type[Schedule] | None = None) -> DateMethod | Callable[[], Awaitable[None]]:
+        return partial(self.func, instance) if instance else self
+
+def date(month: int, day: int) -> Callable[[Callable[[Schedule], Awaitable[None]]], DateMethod]:
+    """Decorator to define an annual date on *day* of *month*."""
+    return partial(DateMethod, month=month, day=day)
+
+class Schedule:
+    """Simulation schedule of a :class:`Space`.
+
+    .. attribute:: space
+
+       Related space.
+    """
+
+    def __init__(self, space: Space) -> None:
+        self.space = space
+
+    async def run(self) -> None:
+        """Simulate all scheduled dates."""
+        def isdate(obj: object) -> bool:
+            return isinstance(obj, DateMethod)
+        members = cast(list[tuple[str, DateMethod]], getmembers(Schedule, isdate))
+        dates = [date for _, date in members]
+
+        for date in dates:
+
+            # TODO handle timezones
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now()
+            #d = now.replace(month=date.month, day=date.day, hour=0, minute=0, second=0,
+            #                microsecond=0)
+            # 21:05:1
+            d = now.replace(month=date.month, day=date.day, hour=21, minute=10, second=30,
+                            microsecond=0)
+            if d + timedelta(seconds=context.bot.get().TICK) < now: # XXX
+                d = d.replace(year=now.year + 1)
+            t = int(d.timestamp() / context.bot.get().TICK)
+
+            print('CHECKING DATE', date.month, date.day, 'IN SIMULATION TICKS', t,
+                  'BOT', context.bot.get().time)
+
+            if context.bot.get().time == t:
+                await date.func(self)
+
+            # when is the next occurance of date.may date.month
+            # (day, month, CURRENT_YEAR)
+            # (day, month, NEXT_YEAR)
+
+            # TODO is this date now?
+            # TODO call function
+
+    # Example
+    # @date(11, 1)
+    @date(10, 31)
+    async def start_jenseits_festival(self) -> None:
+        # TODO
+        print('FESTIVAL IS STARTING')
+        pass
 
 class Pet(Entity):
     """Pet.
