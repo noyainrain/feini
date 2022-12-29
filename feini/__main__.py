@@ -33,7 +33,7 @@ async def main() -> None:
     loop.add_signal_handler(signal.SIGTERM, task.cancel) # type: ignore[misc]
 
     logging.basicConfig(format='%(asctime)s %(levelname)s %(name)s: %(message)s',
-                        level=logging.INFO)
+                        level=logging.INFO) #level=logging.DEBUG)
 
     config = ConfigParser()
     with resources.open_text('feini.res', 'default.ini') as f:
@@ -47,8 +47,10 @@ async def main() -> None:
         return
     telegram_key = config.get('telegram', 'key') or None
     tmdb_key = config.get('tmdb', 'key') or None
+    irc_url = config.get('irc', 'url') or None
     try:
-        bot = Bot(redis_url=redis_url, telegram_key=telegram_key, tmdb_key=tmdb_key, debug=debug)
+        bot = Bot(redis_url=redis_url, telegram_key=telegram_key, tmdb_key=tmdb_key,
+                  irc_url=irc_url, debug=debug)
     except ValueError:
         print(f'Configuration error: Bad [feini] redis_url {redis_url}', file=sys.stderr)
         return

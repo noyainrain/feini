@@ -79,8 +79,10 @@ class Bot:
 
     TICK = 60 * 60
 
-    def __init__(self, *, redis_url: str = 'redis:', telegram_key: str | None = None,
-                 tmdb_key: str | None = None, debug: bool = False) -> None:
+    def __init__(
+        self, *, redis_url: str = 'redis:', telegram_key: str | None = None,
+        tmdb_key: str | None = None, irc_url: str | None = None, debug: bool = False
+    ) -> None:
         self.time = 0
         try:
             self.redis = cast(Redis,
@@ -97,6 +99,9 @@ class Bot:
         self._story_tasks: WeakSet[Task[None]] = WeakSet()
         self._outbox: Queue[Message] = Queue()
 
+        from . import messengers
+        self.irc = messengers.IRC(irc_url) if irc_url else None
+
     async def update(self) -> None:
         """Update the database."""
         def isupdate(obj: object) -> bool:
@@ -111,6 +116,14 @@ class Bot:
 
     async def run(self) -> None:
         """Run the bot continuously."""
+
+        from . import messengers
+        assert self.irc
+        await self.irc.connect([])
+        async for message in self.irc.inbox():
+            print('GOT MESSAGE', message)
+            await self.irc.send(messengers.Message(message.chat, '🐕 Woof!'))
+
         context.bot.set(self)
         self.time = int(datetime.now().timestamp() / self.TICK)
         await self.update()
