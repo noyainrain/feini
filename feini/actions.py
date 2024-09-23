@@ -420,8 +420,7 @@ class MainMode(Mode):
         except KeyError:
             return random.choice([
                 pet_message(pet, f'{pet.name} wags its tail.'), pet_message(pet, speak())])
-        else:
-            return await func(self, space, activity)
+        return await func(self, space, activity)
 
     async def _feed_pet(self, space: Space, *args: str) -> str:
         food = normalize_emoji(args[0])

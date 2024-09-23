@@ -1,2 +1,2 @@
 mypy ~= 0.961.0
-pylint ~= 2.14
+pylint ~= 3.3

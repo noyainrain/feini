@@ -36,7 +36,7 @@ async def main() -> None:
                         level=logging.INFO)
 
     config = ConfigParser()
-    with resources.open_text('feini.res', 'default.ini') as f:
+    with (resources.files('feini.res') / 'default.ini').open() as f:
         config.read_file(f)
     config.read('fe.ini')
     redis_url = config.get('feini', 'redis_url')

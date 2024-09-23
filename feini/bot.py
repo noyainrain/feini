@@ -32,7 +32,7 @@ from urllib.parse import urljoin
 from weakref import WeakSet
 
 from aiohttp import ClientError, ClientPayloadError, ClientSession, ClientTimeout
-import aioredis.client
+import redis.asyncio.client
 
 import feini.space
 from . import actions, context, updates
@@ -83,8 +83,8 @@ class Bot:
                  tmdb_key: str | None = None, debug: bool = False) -> None:
         self.time = 0
         try:
-            self.redis = cast(Redis,
-                              aioredis.client.Redis.from_url(redis_url, decode_responses=True))
+            self.redis: Redis = redis.asyncio.client.Redis.from_url(redis_url, # type: ignore[misc]
+                                                                    decode_responses=True)
         except ValueError as e:
             raise ValueError(f'Bad redis_url {redis_url}') from e
         self.http = ClientSession(timeout=ClientTimeout(total=20))
@@ -148,7 +148,7 @@ class Bot:
     async def close(self) -> None:
         """Close the database connection."""
         await gather(*self._story_tasks) # type: ignore[misc]
-        await self.redis.close()
+        await self.redis.aclose()
         # Work around Redis not closing its connection pool (see
         # https://github.com/aio-libs/aioredis-py/issues/1103)
         try:

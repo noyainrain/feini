@@ -103,6 +103,7 @@ class SewingStory(Story):
             character_ids = [character_id for character_id in character_ids
                              if await pipe.hget(character_id, 'avatar') == '👻']
             character_id = next(iter(character_ids), None)
+            message = None
             if character_id:
                 message = Message.parse((await pipe.lrange(f'{character_id}.dialogue', 0, 0))[0])
 
@@ -125,11 +126,11 @@ class SewingStory(Story):
                 pipe.rpush(f'{self.space_id}.characters', character_id)
                 pipe.hset(self.id, mapping={'chapter': 'quest', 'update_time': bot.time})
                 pipe.rpush('events', str(Event('space-visit-ghost', self.space_id)))
-            elif (chapter == 'quest' and
+            elif (chapter == 'quest' and message and
                   message.id in {'ghost-sewing-blueprint', 'ghost-sewing-goodbye'}):
                 pipe.zadd(f'{self.space_id}.blueprints', {'🪡': Space.BLUEPRINT_WEIGHTS['🪡']})
                 pipe.hset(self.id, mapping={'chapter': 'leave', 'update_time': bot.time})
-            elif chapter == 'leave' and message.id == 'ghost-sewing-goodbye':
+            elif chapter == 'leave' and message and message.id == 'ghost-sewing-goodbye':
                 assert character_id
                 pipe.delete(character_id, f'{character_id}.dialogue')
                 pipe.lrem(f'{self.space_id}.characters', 1, character_id)
